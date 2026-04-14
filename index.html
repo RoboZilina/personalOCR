@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal OCR — Master Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta http-equiv="Content-Security-Policy"
+        content="script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'unsafe-inline'; connect-src 'self' blob: https://cdn.jsdelivr.net https://fastly.jsdelivr.net https://tessdata.projectnaptha.com data: https://github.com https://objects.githubusercontent.com; worker-src 'self' blob:;">
+    <link rel="icon" href="icon-192.png">
+</head>
+
+<body>
+    <div class="dashboard-root">
+        <!-- GLOBAL CONTROL BAR -->
+        <header class="app-header">
+            <!-- Phase 7.1: Remaining hidden controls -->
+            <div style="display:none">
+                <button id="theme-toggle"></button>
+                <input type="checkbox" id="auto-capture-toggle">
+                <button id="install-btn"></button>
+                <button id="help-btn"></button>
+            </div>
+            <div class="menu-anchor">
+                <button id="menu-btn" class="menu-btn" aria-label="Menu">☰</button>
+            </div>
+            <div class="header-left">
+                <div class="brand">Personal OCR</div>
+                <div class="divider"></div>
+                <div class="controls-group">
+                    <select id="mode-selector" class="ui-select">
+                        <option value="default_mini" selected>Default Mini</option>
+                        <option value="default_full">Default Full</option>
+                        <option value="adaptive">Adaptive</option>
+                        <option value="multi">Multi-Pass</option>
+                        <option value="last_resort">Last Resort</option>
+                        <option value="binarize">Contrast</option>
+                        <option value="grayscale">Grayscale</option>
+                        <option value="raw">Raw</option>
+                    </select>
+                    <button id="panic-btn" class="panic-btn" title="Panic Mode: Max Enhance!">🚨</button>
+                    <select id="model-selector" class="ui-select">
+                        <option value="tesseract">Tesseract (Lightweight)</option>
+                        <optgroup label="PaddleOCR (Multi-Line)">
+                            <option value="paddle_1">PaddleOCR – 1 line</option>
+                            <option value="paddle_2">PaddleOCR – 2 lines</option>
+                            <option value="paddle_3">PaddleOCR – 3 lines</option>
+                            <option value="paddle_4">PaddleOCR – 4 lines</option>
+                        </optgroup>
+                        <option value="manga">MangaOCR (Japanese)</option>
+                    </select>
+                    <div id="manga-note">
+                        ⚠️ <span class="manga-note-text">Best for Manga. Wide VN text may fail.</span>
+                    </div>
+                    <select id="tts-voice-select" class="ui-select" title="TTS Voice" style="max-width: 150px;">
+                        <option value="">🔇 TTS Off</option>
+                    </select>
+                </div>
+            </div>
+            <div class="header-right">
+                <div id="status-row" style="display:flex; align-items:center; gap:8px;">
+                    <div id="ocr-status" class="status-pill loading">🔴 Loading...</div>
+                    <span id="perf-icon" style="cursor:pointer; font-size:16px; user-select:none; margin-left: 4px;"></span>
+                </div>
+                <div id="perf-info" class="perf-diagnostic-box" style="display:none;"></div>
+                <button id="select-window-btn" class="btn primary"><span>Select Window Source</span></button>
+            </div>
+        </header>
+
+        <!-- STARTUP BANNER FOR PADDLEOCR -->
+        <div id="startup-banner" class="startup-banner">
+            <div class="banner-text">
+                🚀 <strong>PaddleOCR Mode Active:</strong> This mode uses a powerful high-precision model.
+            </div>
+            <div class="banner-actions">
+                <button id="banner-switch-default" class="btn">Switch to Default</button>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="banner-nocall-checkbox">
+                    <label for="banner-nocall-checkbox">Don't show again</label>
+                </div>
+                <button id="banner-close" class="modal-close" style="position:static; font-size: 20px;">&times;</button>
+            </div>
+        </div>
+
+        <main class="app-main">
+            <!-- MAIN CONTENT AREA (VIDEO + LATEST TEXT) -->
+            <section class="main-workspace">
+                <div class="video-stage">
+                    <div id="selection-hint" class="selection-hint">🖱️ Click and drag on video to select text area
+                    </div>
+                    <div class="video-anchor">
+                        <video id="vn-video" autoplay muted playsinline></video>
+                        <canvas id="selection-overlay"></canvas>
+                        <div id="placeholder" class="placeholder">
+                            <div class="icon-glow">🎮</div>
+                            <p>Awaiting Visual Novel Stream</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="transcription-tray">
+                    <div class="tray-actions">
+                        <div class="tray-buttons-row">
+                            <button id="refresh-ocr-btn" class="btn action-btn" disabled>🔄 RE-CAPTURE</button>
+                            <button id="auto-capture-btn" class="btn auto-btn">
+                                <span class="auto-btn-text"></span>
+                            </button>
+                        </div>
+                        <img id="debug-crop-img" class="debug-img">
+                    </div>
+                    <div class="latest-line-window">
+                        <p id="latest-text" class="latest-text-content" lang="ja">Waiting for capture...</p>
+                        <button id="speak-latest-btn" class="speak-main-btn" title="Speak Latest Line">🔊</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CONTEXT SIDEBAR -->
+            <aside class="history-sidebar">
+                <div class="sidebar-header">
+                    <h3>History Log</h3>
+                    <button id="clear-history-btn" class="icon-btn" title="Clear All">🗑️</button>
+                </div>
+                <div id="history-content" class="history-scroll"></div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- USER GUIDE MODAL -->
+    <div id="help-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" id="help-close">&times;</button>
+            <div class="modal-header">
+                <h2>User Guide</h2>
+                <p>Everything you need to get crisp reads from your visual novel</p>
+            </div>
+            <div class="guide-grid">
+                <div class="guide-card">
+                    <h3>🚀 Quick Start — 30-Second Setup</h3>
+                    <ol style="padding-left: 18px; line-height: 1.6; margin-bottom: 12px;">
+                        <li>Click <strong>Select Window Source</strong> and choose your VN window.</li>
+                        <li>Drag a rectangle around the <strong>dialogue text area</strong> in the mirrored preview.
+                        </li>
+                        <li>OCR runs instantly — text appears below and is copied to clipboard.</li>
+                    </ol>
+                    <p style="font-size: 11px; font-style: italic; color: var(--accent); margin-bottom: 12px;">Note: The RE-CAPTURE button has a 300ms cooldown to prevent accidental double-clicks.</p>
+                    <p><strong>Essential Controls:</strong></p>
+                    <ul style="padding-left: 18px; line-height: 1.5; margin-bottom: 12px;">
+                        <li><strong>🔄 RE-CAPTURE:</strong> Manually re-scan the same region anytime.</li>
+                        <li><strong>AUTO Button:</strong> Enable hands-free continuous reading (next to RE-CAPTURE).
+                        </li>
+                        <li><strong>Debug Thumbnail (Dev only):</strong> Advanced diagnostic view showing the exact capture sent to OCR — useful for engineering troubleshooting.</li>
+                        <li><strong>Scaling & Engine:</strong> Adjust in the header for best results on small or complex
+                            fonts.</li>
+                        <li><strong>TTS & History:</strong> Hear lines spoken aloud (🔊) or browse the sidebar for past
+                            logs.</li>
+                    </ul>
+                    <p style="font-size: 12px; opacity: 0.8; border-top: 1px solid var(--border); padding-top: 8px;">
+                        <em>The <strong>OCR Engine</strong> reads the text. The <strong>Image Processing Mode</strong>
+                            prepares the image for the engine. You can mix and match them depending on the media source.</em>
+                    </p>
+                </div>
+                <div class="guide-card">
+                    <h3>🧩 Recommended Extensions</h3>
+                    <p><strong>Important:</strong> This application does not provide built-in translations. For the best reading experience, install browser extensions such as 
+                        <strong>Google Translate</strong>, <strong>Yomitan</strong>, or your preferred text‑to‑speech tool.
+                    </p>
+                    <p>These extensions can instantly translate or read aloud the extracted text, making the OCR output much easier to follow.</p>
+                </div>
+                <div class="guide-card">
+                    <h3>🛡️ Browser Compatibility</h3>
+                    <p>For the definitive <strong>Gold v3.1</strong> experience, we recommend:</p>
+                    <ul style="margin-bottom: 12px; font-size: 12px;">
+                        <li><strong>Chrome / Edge 113+:</strong> Full WebGPU & Threading status.</li>
+                        <li><strong>Firefox:</strong> Stable, but may run in ⚠️ Compatibility Mode.</li>
+                        <li><strong>Incognito Mode:</strong> Not recommended (may block model caching).</li>
+                    </ul>
+                    <p style="font-size: 11px; opacity: 0.8;">If you see ⚠️ instead of 🔥, your hardware or browser is restricting performance.</p>
+                </div>
+                <div class="guide-card">
+                    <h3>⚡ Performance & Diagnostics</h3>
+                    <p>Check the <strong>Performance Icon</strong> next to the status pill in the header to see your hardware status:</p>
+                    <ul style="margin-bottom: 12px;">
+                        <li><strong>🔥 High-Performance:</strong> WebGPU acceleration and Multi-threading are active. OCR will be lightning-fast.</li>
+                        <li><strong>⚠️ Compatibility Mode:</strong> The browser is running in a restricted sandbox. Performance may be slower as it falls back to CPU-only processing.</li>
+                    </ul>
+                    <p><em>Tip: To unlock 🔥 mode, ensure your server headers include COOP/COEP protection.</em></p>
+                    
+                    <h4 style="margin-top: 15px; margin-bottom: 8px;">System Integrity</h4>
+                    <table class="diag-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <td style="padding: 4px 0;">Model Assets (Hybrid)</td>
+                            <td id="diag-assets" class="diag-status-ok" style="text-align: right; font-weight: bold;">INIT…</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="guide-card">
+                    <h3>🔮 Image Processing Modes</h3>
+                    <p>These modes prepare the image for the OCR engine. They are NOT the OCR models themselves:</p>
+                    <ul>
+                        <li><strong>Default Mini:</strong> Balanced speed and accuracy. Smart thresholding with light denoise. Great for clean, modern media.</li>
+                        <li><strong>Default Full:</strong> Maximum fidelity. High-contrast normalization and strong sharpening. Best for classic or low-res captures.</li>
+                        <li><strong>Adaptive:</strong> Adaptive Thresholding. Uses local tile analysis to handle gradients and semi-transparent text boxes with extreme precision.</li>
+                        <li><strong>Multi-Pass:</strong> The Analyst. Runs 5 preprocessing passes and uses "Consensus Voting" to select the most Japanese-like result. Includes a real-time diagnostic overlay with an <strong>Engine Indicator</strong> to show exactly what is being analyzed.</li>
+                        <li><strong>Last Resort:</strong> The Nuclear Option. Performs advanced textbox isolation and stroke reconstruction. Use when all else fails.</li>
+                        <li><strong>Contrast:</strong> Hard black/white. Best for flat, clean backgrounds.</li>
+                        <li><strong>Grayscale:</strong> Preserved tonal detail. Good for colorful or gradient backgrounds.</li>
+                        <li><strong>Raw:</strong> No digital preprocessing. Direct capture.</li>
+                    </ul>
+                </div>
+                <div class="guide-card">
+                    <h3>🔍 Scaling &amp; OCR Engine</h3>
+                    <p>Adjust the <strong>Scaling</strong> slider to upscale the capture before OCR:</p>
+                    <ul>
+                        <li><strong>1x – 2x:</strong> Standard 1080p content.</li>
+                        <li><strong>3x – 4x:</strong> Small or highly packed dialogue boxes.</li>
+                    </ul>
+                    <p style="margin-top:10px;">Choose your <strong>OCR Engine</strong>:</p>
+                    <ul>
+                        <li><strong>Tesseract:</strong> Classic engine. Optimized for low-latency standard text.</li>
+                        <li><strong>PaddleOCR:</strong> High-precision neural recognizer. Powered by <strong>WebGPU Acceleration</strong> and <strong>Zero-Allocation</strong> memory pooling.</li>
+                        <li><strong>MangaOCR (Japanese):</strong> Premium Transformers model. Optimized with <strong>WebGPU Shader Pre-Warming</strong> to eliminate stutter.</li>
+                    </ul>
+                    <p style="font-size: 12px; opacity: 0.8; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 10px;">
+                        <em>When <strong>PaddleOCR</strong> or <strong>MangaOCR</strong> are selected, the Image Processing Mode dropdown is purposefully bypassed — they use their own high-fidelity pipelines optimized for neural network recognition. Switch back to <strong>Tesseract</strong> to use preprocessing modes again.</em>
+                    </p>
+                </div>
+                <div class="guide-card">
+                    <h3>👁️ Autonomous Eye (Auto-Capture)</h3>
+                    <p>Use the <strong>AUTO</strong> button next to <strong>RE-CAPTURE</strong> to enable hands-free
+                        OCR.</p>
+                    <ul style="margin-top:5px; margin-bottom:10px;">
+                        <li><strong>AUTO: ON</strong> — Indicator turns green</li>
+                        <li><strong>AUTO: OFF</strong> — Indicator turns gray</li>
+                        <li>Clicking toggles automation instantly</li>
+                        <li>Reflects the global state also found in the side menu</li>
+                    </ul>
+                    <p><strong>How it works:</strong></p>
+                    <ul>
+                        <li>Scans the selected region every <strong>500ms</strong> for pixel-level changes.</li>
+                        <li>Waits <strong>800ms</strong> after stabilization to avoid mid-transition frames.</li>
+                        <li>Works best with a tight capture region around the dialogue text.</li>
+                    </ul>
+                </div>
+                <div class="guide-card">
+                    <h3>🔊 Text-to-Speech</h3>
+                    <ul>
+                        <li>Select a Japanese voice from the <strong>TTS Voice</strong> dropdown in the header.</li>
+                        <li>Click <strong>🔊</strong> next to the latest line to hear it spoken aloud.</li>
+                        <li>Every history entry also has its own 🔊 button for replaying past lines.</li>
+                        <li>Select <strong>🔇 TTS Off</strong> to disable speech entirely.</li>
+                    </ul>
+                </div>
+                <div class="guide-card">
+                    <h3>📋 High-Speed Clipping (Auto-Copy)</h3>
+                    <p>Extract and copy specific text segments from the results tray with zero friction:</p>
+                    <ul>
+                        <li><strong>Enable:</strong> Turn on <strong>Auto-copy selected text</strong> in the Side Menu (≡).</li>
+                        <li><strong>Clip:</strong> Simply highlight any text in the transcription area using your mouse.</li>
+                        <li><strong>Confirm:</strong> An accent outline will flash to confirm the text is safely on your clipboard.</li>
+                    </ul>
+                </div>
+                <div class="guide-card">
+                    <h3>💡 Pro Tips</h3>
+                    <ul>
+                        <li><strong>Deterministic Reset:</strong> Use <strong>Reset to Defaults</strong> in the Side Menu (≡) to clear all cache and restore the v3.1 Gold factory state.</li>
+                        <li><strong>UI Customization:</strong> Use the <strong>Side Menu</strong> (≡) to adjust the <strong>Text Area Size</strong> and <strong>Text Size</strong> to match your device.</li>
+                        <li><strong>Manga Focus:</strong> MangaOCR is strictly optimized for comic panels. For standard Visual Novel UI text, <strong>PaddleOCR</strong> or <strong>Tesseract</strong> will almost always yield better results.</li>
+                        <li><strong>History:</strong> The sidebar logs up to 100 lines, restored on next session. Use the 📋 icon next to any entry to copy the full line.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PADDLEOCR WARNING MODAL -->
+    <div id="paddle-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 style="color: var(--panic)">PaddleOCR Warning</h2>
+                <p>Heavy Model Initialization</p>
+            </div>
+            <div class="guide-card" style="margin-bottom: 20px;">
+                <p>This mode loads a large neural network (20–80 MB) and may use significant CPU/GPU resources.</p>
+                <p><strong>Note:</strong> On slower connections, the first load may take several seconds.</p>
+            </div>
+            <div class="checkbox-group" style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="heavy-warning-checkbox">
+                <label for="heavy-warning-checkbox" style="font-size: 13px; color: var(--text-dim);">Do not show this warning again</label>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px;">
+                <button id="paddle-cancel" class="btn" style="background: var(--border); color: var(--text);">Cancel</button>
+                <button id="paddle-continue" class="btn primary">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MANGA OCR WARNING MODAL -->
+    <div id="manga-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 style="color: #ff9800">MangaOCR Warning</h2>
+                <p>Large Model Download</p>
+            </div>
+            <div class="guide-card" style="margin-bottom: 20px;">
+                <p>This mode downloads a large Vision Transformer neural network <strong>(up to 450 MB)</strong> and is heavily optimized for reading <strong>perfectly square Manga panels</strong>. It may struggle with horizontal media interfaces.</p>
+                <p><strong>Note:</strong> Models are downloaded entirely on first use and permanently cached locally for instant offline loading in the future.</p>
+            </div>
+            <div class="checkbox-group" style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="manga-warning-checkbox">
+                <label for="manga-warning-checkbox" style="font-size: 13px; color: var(--text-dim);">Do not show this warning again</label>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px;">
+                <button id="manga-cancel" class="btn" style="background: var(--border); color: var(--text);">Cancel</button>
+                <button id="manga-continue" class="btn primary">Continue to Manga</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="side-menu" class="side-menu">
+        <div class="menu-header">
+            <h3>Side Menu</h3>
+        </div>
+        <div class="menu-section">
+            <h4>Theme</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="theme" data-value="auto">Auto</button>
+                <button class="menu-subitem-btn" data-setting="theme" data-value="dark">Dark</button>
+                <button class="menu-subitem-btn" data-setting="theme" data-value="light">Light</button>
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>Tesseract Upscale</h4>
+            <div class="slider-group" title="Tesseract Upscaling Factor" style="padding: 0; justify-content: space-between;">
+                <label style="width: auto;">Factor: <span id="upscale-val">2.0</span>x</label>
+                <input type="range" id="upscale-slider" min="1" max="4" step="0.5" value="2.0" style="width: 120px;">
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>Auto-Capture</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="autoCapture" data-value="true">On</button>
+                <button class="menu-subitem-btn" data-setting="autoCapture" data-value="false">Off</button>
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>Auto-Copy</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="autoCopy" data-value="true">On</button>
+                <button class="menu-subitem-btn" data-setting="autoCopy" data-value="false">Off</button>
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>History Panel</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="historyVisible" data-value="true">Show</button>
+                <button class="menu-subitem-btn" data-setting="historyVisible" data-value="false">Hide</button>
+            </div>
+        </div>
+
+        <div class="menu-section" id="menu-capture-preview">
+            <h4>Capture Preview</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="previewVisible" data-value="true">Show</button>
+                <button class="menu-subitem-btn" data-setting="previewVisible" data-value="false">Hide</button>
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>Text Area Size</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="textAreaSize" data-value="small">Small</button>
+                <button class="menu-subitem-btn" data-setting="textAreaSize" data-value="standard">Standard</button>
+                <button class="menu-subitem-btn" data-setting="textAreaSize" data-value="large">Large</button>
+            </div>
+        </div>
+
+        <div class="menu-section">
+            <h4>Text Size</h4>
+            <div class="menu-options-row">
+                <button class="menu-subitem-btn" data-setting="textSize" data-value="small">Small</button>
+                <button class="menu-subitem-btn" data-setting="textSize" data-value="standard">Standard</button>
+                <button class="menu-subitem-btn" data-setting="textSize" data-value="large">Large</button>
+            </div>
+        </div>
+        <button id="menu-install" class="menu-item-btn" data-action="install">Install App</button>
+        <button id="menu-guide" class="menu-item-btn" data-action="guide">User Guide</button>
+        <button id="menu-contact" class="menu-item-btn" data-action="contact">Contact / Report Issue</button>
+        <button id="menu-reset" class="menu-item-btn warning-text" data-action="reset">Reset to Defaults</button>
+    </div>
+    <div id="menu-backdrop" class="menu-backdrop"></div>
+
+    <!-- Scripts at the end of body -->
+    <script src="./js/onnx/ort.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"
+        crossorigin="anonymous"></script>
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

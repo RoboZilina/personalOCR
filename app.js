@@ -1148,6 +1148,7 @@ async function captureFrame(rect = null) {
             setOCRStatus('ready', '🟢 OCR Complete');
             if (typeof updateLatestText === 'function') {
                 updateLatestText(finalText);
+            }
         } else {
             setOCRStatus('ready', '⚪ No text detected');
         }

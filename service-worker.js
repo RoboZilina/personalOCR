@@ -54,16 +54,56 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  const url = new URL(event.request.url);
-  const path = url.pathname;
-
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.match(event.request).then((cachedResponse) => {
+        // Fetch from network if not in cache
+        const fetchPromise = fetch(event.request).then((networkResponse) => {
+          // If the request fails or is opaque, just return it
+          if (!networkResponse || networkResponse.status === 0) {
+            return networkResponse;
+          }
+
+          // Hybrid Header Injection (Universal Isolation)
+          // We must clone the response to modify headers
+          const newHeaders = new Headers(networkResponse.headers);
+          newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+          newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+          newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
+
+          const isolatedResponse = new Response(networkResponse.body, {
+            status: networkResponse.status,
+            statusText: networkResponse.statusText,
+            headers: newHeaders,
+          });
+
+          // Cache the isolated response for future use
+          if (networkResponse.ok) {
+            cache.put(event.request, isolatedResponse.clone());
+          }
+
+          return isolatedResponse;
+        }).catch(() => {
+          // Fallback if network fails and not in cache
+          return null;
+        });
+
+        // Return cached response if available, but wrap it to ensure headers are present
         if (cachedResponse) {
+          const newHeaders = new Headers(cachedResponse.headers);
+          if (!newHeaders.has('Cross-Origin-Embedder-Policy')) {
+            newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+            newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+            return new Response(cachedResponse.body, {
+              status: cachedResponse.status,
+              statusText: cachedResponse.statusText,
+              headers: newHeaders,
+            });
+          }
           return cachedResponse;
         }
-        return fetch(event.request);
+
+        return fetchPromise;
       });
     })
   );

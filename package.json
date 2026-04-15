@@ -6,7 +6,8 @@
   "scripts": {
     "audit:braces": "node scripts/check_braces.js",
     "audit:dom": "node scripts/audit_dom_integrity.js",
-    "audit": "node scripts/check_braces.js && node scripts/audit_dom_integrity.js"
+    "audit:static": "node scripts/static_audit.js",
+    "audit": "node scripts/check_braces.js && node scripts/audit_dom_integrity.js && node scripts/static_audit.js"
   },
   "author": "RoboZilina",
   "license": "MIT"

@@ -2039,24 +2039,42 @@ async function globalInitialize() {
         setOCRStatus(state, text);
     });
 
-    // Service Worker with update notification
+    // Service Worker with Universal Isolation Support
     if ('serviceWorker' in navigator) {
         const disableViaParam = new URLSearchParams(location.search).has('no-sw');
         const disableViaStorage = localStorage.getItem('vn-ocr-disable-sw') === 'true';
         if (disableViaParam || disableViaStorage) {
             navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
         } else {
-            navigator.serviceWorker.register('service-worker.js').catch(e => console.warn('SW registration failed:', e));
+            navigator.serviceWorker.register('service-worker.js').then(reg => {
+                // Check if we need to reload to enable isolation headers from the SW
+                if (!window.crossOriginIsolated && reg.active) {
+                    console.log("[SW] Isolation headers ready. Refresh required for high-performance mode.");
+                }
+            }).catch(e => console.warn('SW registration failed:', e));
+
             navigator.serviceWorker.addEventListener('controllerchange', () => {
+                // Safeguard against infinite reload loops
+                const reloadCount = parseInt(sessionStorage.getItem('vn-ocr-sw-reload') || '0');
+                if (reloadCount > 1) {
+                    console.warn("[SW] Performance mode failed to stabilize after multiple reloads. Falling back to compatibility mode.");
+                    return;
+                }
+
                 const banner = document.createElement('div');
                 banner.className = 'startup-banner active';
                 banner.style.zIndex = '99999';
                 banner.innerHTML = `
-                    <div class="banner-text">🚀 <strong>Update Available:</strong> A new version of Personal OCR is ready.</div>
+                    <div class="banner-text">🚀 <strong>Performance Engine Ready:</strong> Refresh to enable Hardware Acceleration (WebGPU/Threads).</div>
                     <div class="banner-actions">
-                        <button class="btn" onclick="location.reload()">Refresh Now</button>
+                        <button class="btn" id="enable-hw-btn">Enable Now</button>
                     </div>`;
                 document.body.prepend(banner);
+
+                document.getElementById('enable-hw-btn').onclick = () => {
+                    sessionStorage.setItem('vn-ocr-sw-reload', (reloadCount + 1).toString());
+                    location.reload();
+                };
             });
         }
     }

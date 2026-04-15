@@ -14,27 +14,37 @@ This version represents the definitive production standard for the project. It b
 - **Zero-Allocation Memory Architecture** — Every inference loop uses pre-allocated, hardware-aligned memory pools, preventing Garbage Collection spikes.
 - **Service Worker Efficiency** — Optimized caching strategy specifically designed for Cloudflare, excluding massive binary models to prevent storage bloat.
 
-## Hosting on Cloudflare Pages
-This branch is "Cloudflare-Ready" out of the box:
+## Hosting & Deployment Hardening
+This repository is strictly **Agnostic & Static**. It does not use Cloudflare Workers, Node.js servers, or any server-side logic. 
 
-- **Headers:** Uses the root `_headers` file to set `Cross-Origin-Embedder-Policy: require-corp` and `Cross-Origin-Opener-Policy: same-origin`.
-- **Assets:** Ensure `service-worker.js` is served with `Cache-Control: no-cache`.
-- **Optimized Delivery:** Performance is available immediately on page load without the need for the Service Worker "shim" required on other platforms.
+### 🛑 The "Wrangler Ghost" Fix (Cloudflare Pages)
+If Cloudflare Pages attempts to build your project as a **Worker** (causing build failures), it is usually due to stale project settings in the Cloudflare Dashboard. Follow these steps to purge the "Ghost" configuration:
 
-## Diagnostics (🔥)
-Check the Fire icon (🔥) in the top right to confirm your browser has successfully unlocked WebGPU and Multi-threading. If you see a Warning (⚠️), the app is running in Compatibility Mode (CPU-only).
+1.  **Dashboard Side:**
+    *   Navigate to **Workers & Pages** -> [Your Project] -> **Settings** -> **Build & deployments**.
+    *   **Build Command:** Clear this completely (should be blank).
+    *   **Root Directory:** Set to `/`.
+    *   **Framework Preset:** Set to `None`.
+    *   **Environment Variables:** Delete `NODE_VERSION` or any `WRANGLER` related tokens.
+2.  **Repository Side:**
+    *   Ensure no `wrangler.toml` exists in the root.
+    *   Run `npm run audit:static` to verify the environment is pure.
 
-## Browser Compatibility
+### 🚀 Universal Isolation (COOP/COEP)
+WebGPU and WASM Multi-threading require a "Cross-Origin Isolated" environment. 
+- **Native Support:** On Cloudflare and Netlify, the root `_headers` file handles this automatically.
+- **Universal Fallback:** The `service-worker.js` automatically injects these headers into all locally served assets. This allows the app to run with full hardware acceleration even on "dumb" hosts like **GitHub Pages**.
 
-| Feature | Optimal (🔥) | Limited (⚠️) |
-| :--- | :--- | :--- |
-| **Engine** | Chromium 113+ (Chrome, Edge) | Firefox, Safari |
-| **PWA / Cache** | Supported | Limited in Incognito |
-| **WebGPU** | Native | Experimental / Disabled |
-| **WASM Threading** | Active (via COOP/COEP) | Fallback to Single-Thread |
+## Maintainer's Audit (Gold Gate)
+To prevent accidental regression toward server-side logic, use the provided audit suite:
 
-> [!IMPORTANT]
-> Some browsers, mobile devices, or highly restricted enterprise environments may not support WebGPU or SharedArrayBuffer. In these cases, the application will fallback to Compatibility Mode, which is significantly slower. If the page fails to load, ensure you are not in a "Private/Incognito" tab which may block the Service Worker.
+```bash
+# Verify no Worker remnants (wrangler.toml, functions/, etc.)
+npm run audit:static
+
+# Verify code integrity
+npm run audit
+```
 
 ## Tips
 - Use **Scaling 3× or 4×** for low-resolution media or small font sizes.

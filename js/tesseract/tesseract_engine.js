@@ -18,7 +18,7 @@ export class TesseractEngine {
             './js/tesseract/tesseract-core.wasm.js'
         ];
         const remoteAssets = [
-            'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/personalocr-assets/tesseract/jpn.traineddata'
+            'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/jpn.traineddata'
         ];
         
         try {
@@ -55,9 +55,9 @@ export class TesseractEngine {
             const actualLang = 'jpn';
 
             this.worker = await Tesseract.createWorker(actualLang, 1, {
-                langPath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/personalocr-assets/tesseract/',
+                langPath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/',
                 workerPath: './js/tesseract/worker.min.js',
-                corePath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/personalocr-assets/tesseract/',
+                corePath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/',
                 gzip: useGzip,
                 logger: m => {
                     if (m.status === 'loading language traineddata') {

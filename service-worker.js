@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personalocr-cloudflare-gold-v3.1';
+const CACHE_NAME = 'personalocr-cloudflare-gold-v3.3';
 
 const ASSETS = [
   '/',
@@ -18,6 +18,16 @@ const ASSETS = [
   '/js/paddle/paddle_core.js',
   '/js/paddle/paddle_engine.js',
   '/js/tesseract/tesseract_engine.js',
+  '/js/tesseract/worker.min.js',
+  '/js/tesseract/tesseract.min.js',
+  '/js/tesseract/core/tesseract-core.wasm',
+  '/js/tesseract/core/tesseract-core.wasm.js',
+  '/js/tesseract/core/tesseract-core-lstm.wasm',
+  '/js/tesseract/core/tesseract-core-lstm.wasm.js',
+  '/js/tesseract/core/tesseract-core-simd.wasm',
+  '/js/tesseract/core/tesseract-core-simd.wasm.js',
+  '/js/tesseract/core/tesseract-core-simd-lstm.wasm',
+  '/js/tesseract/core/tesseract-core-simd-lstm.wasm.js',
   '/manifest.json',
   '/models/manga/config.json',
   '/models/manga/manifest.json',
@@ -29,6 +39,7 @@ const ASSETS = [
   '/styles.css'
 ];
 
+// 1. Installs Assets (Cache-First)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -37,6 +48,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// 2. Cleanup Old Caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -51,59 +63,21 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// 3. Simple Fetch Handler (No Header Injection)
 self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
+  // Simplified Strategy: Cache Match -> Network Fallback
   event.respondWith(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.match(event.request).then((cachedResponse) => {
-        // Fetch from network if not in cache
-        const fetchPromise = fetch(event.request).then((networkResponse) => {
-          // If the request fails or is opaque, just return it
-          if (!networkResponse || networkResponse.status === 0) {
-            return networkResponse;
-          }
+    caches.match(event.request).then((cachedResponse) => {
+      // Return cached asset if found
+      if (cachedResponse) return cachedResponse;
 
-          // Hybrid Header Injection (Universal Isolation)
-          // We must clone the response to modify headers
-          const newHeaders = new Headers(networkResponse.headers);
-          newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
-          newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-          newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
-
-          const isolatedResponse = new Response(networkResponse.body, {
-            status: networkResponse.status,
-            statusText: networkResponse.statusText,
-            headers: newHeaders,
-          });
-
-          // Cache the isolated response for future use
-          if (networkResponse.ok) {
-            cache.put(event.request, isolatedResponse.clone());
-          }
-
-          return isolatedResponse;
-        }).catch(() => {
-          // Fallback if network fails and not in cache
-          return null;
-        });
-
-        // Return cached response if available, but wrap it to ensure headers are present
-        if (cachedResponse) {
-          const newHeaders = new Headers(cachedResponse.headers);
-          if (!newHeaders.has('Cross-Origin-Embedder-Policy')) {
-            newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
-            newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-            return new Response(cachedResponse.body, {
-              status: cachedResponse.status,
-              statusText: cachedResponse.statusText,
-              headers: newHeaders,
-            });
-          }
-          return cachedResponse;
-        }
-
-        return fetchPromise;
+      // Otherwise, fetch from network without intercepting/rewriting
+      return fetch(event.request).catch(() => {
+        // Silent fail for network errors (e.g., offline with no cache)
+        return null;
       });
     })
   );

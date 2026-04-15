@@ -14,8 +14,8 @@ export class TesseractEngine {
     async checkAssets() {
         const localAssets = [
             './js/tesseract/worker.min.js',
-            './js/tesseract/tesseract-core.worker.js',
-            './js/tesseract/tesseract-core.wasm.js'
+            './js/tesseract/core/tesseract-core-simd-lstm.wasm.js',
+            './js/tesseract/core/tesseract-core-simd-lstm.wasm'
         ];
         const remoteAssets = [
             'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/jpn.traineddata'

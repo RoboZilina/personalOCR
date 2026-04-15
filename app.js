@@ -8,13 +8,29 @@ const logTrace = (msg) => { if (window.VNOCR_DEBUG) console.log(`[TRACE] ${msg}`
  */
 const logMemoryUsage = (context = "") => {
     if (!window.VNOCR_DEBUG) return;
+    const stats = getMemoryStats();
+    if (stats) {
+        console.debug(`[MEMORY] ${context} Used: ${stats.used}MB | Total: ${stats.total}MB | Limit: ${stats.limit}MB`);
+    }
+};
+
+const getMemoryStats = () => {
     if (performance && performance.memory) {
         const { usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit } = performance.memory;
-        const usedMB = (usedJSHeapSize / (1024 * 1024)).toFixed(1);
-        const totalMB = (totalJSHeapSize / (1024 * 1024)).toFixed(1);
-        const limitMB = (jsHeapSizeLimit / (1024 * 1024)).toFixed(1);
-        console.debug(`[MEMORY] ${context} Used: ${usedMB}MB | Total: ${totalMB}MB | Limit: ${limitMB}MB`);
+        return {
+            used: (usedJSHeapSize / (1024 * 1024)).toFixed(1),
+            total: (totalJSHeapSize / (1024 * 1024)).toFixed(1),
+            limit: (jsHeapSizeLimit / (1024 * 1024)).toFixed(1)
+        };
     }
+    return null;
+};
+
+const perfStats = {
+    inference: 0,
+    preprocess: 0,
+    lastUpdate: Date.now(),
+    showAdvanced: false
 };
 /*
   PERSONAL OCR HARDENING PHASE:
@@ -1059,19 +1075,23 @@ async function captureFrame(rect = null) {
     const engine = EngineManager.getInfo().id;
     try {
         if (engine === 'tesseract' && mode === 'multi') {
-            setOCRStatus('processing', 'Analyst: Pass 1/5...');
+            performanceMetrics?.preprocess = 0; // Legacy ref
+            const preStart = performance.now();
             const canvases = applyTesseractPreprocessing(rawCropCanvas, mode);
+            perfStats.preprocess = performance.now() - preStart;
             const results = [];
 
             // 1. First Pass: Early exit if result is highly confident and clean
+            const infStart = performance.now();
             const first = await EngineManager.runOCR(canvases[0], 'tesseract');
             const firstDensity = scoreJapaneseDensity(first.text);
 
             if (first.confidence > 85 && firstDensity > 5) {
                 addOCRResultToUI(first.text);
                 updateDebugThumb(canvases[0]);
-                setOCRStatus('ready', '🟢 Analyst: Early Exit');
+                perfStats.inference = performance.now() - infStart;
                 canvases.forEach(c => { c.width = 0; c.height = 0; });
+                if (window.updatePerformanceStatus) window.updatePerformanceStatus();
                 return;
             }
 
@@ -1088,13 +1108,17 @@ async function captureFrame(rect = null) {
             const bestIndex = findBestMultiPassIndex(results);
             updateDebugThumb(canvases[bestIndex]);
             showMultiPassOverlay(results, finalText);
+            perfStats.inference = performance.now() - infStart;
             setOCRStatus('ready', '🟢 Analyst Complete');
             canvases.forEach(c => { c.width = 0; c.height = 0; });
+            if (window.updatePerformanceStatus) window.updatePerformanceStatus();
             return;
         }
 
         const lineCount = getSetting('paddleLineCount') || 1;
+        const preStart = performance.now();
         const canvases = await preprocessForEngine(EngineManager.getInfo().id, rawCropCanvas, mode, lineCount);
+        perfStats.preprocess = performance.now() - preStart;
         logTrace(`Preprocessing complete. Slices: ${canvases.length}`);
         if (getSetting('debug')) console.debug("[INFERENCE-DEBUG] total slices:", canvases.length);
 
@@ -1107,6 +1131,7 @@ async function captureFrame(rect = null) {
 
         // 3. Sequential Inference Loop (Hardening v3.4: Fixes Session Mismatch)
         const inferenceResults = [];
+        const infStart = performance.now();
         for (let i = 0; i < canvases.length; i++) {
             const clean = canvases[i];
             if (!clean.width || !clean.height) {
@@ -1137,6 +1162,7 @@ async function captureFrame(rect = null) {
                 inferenceResults.push({ text: EngineManager.handleError(error), confidence: null });
             }
         }
+        perfStats.inference = performance.now() - infStart;
 
         if (captureGeneration !== myGen) return;
 
@@ -1204,6 +1230,7 @@ async function captureFrame(rect = null) {
                 if (!isProcessing) console.warn(`[${new Date().toISOString()}] [CAPTURE] Double-release detected for Gen ${myGen}`);
                 console.debug(`[${new Date().toISOString()}] [CAPTURE] Lock released: Gen ${myGen}`);
                 logMemoryUsage("Post-Capture");
+                if (window.updatePerformanceStatus) window.updatePerformanceStatus();
             }
             isProcessing = false;
             if (EngineManager.isReady()) {
@@ -1935,15 +1962,49 @@ async function globalInitialize() {
     }
 
     if (perfIcon && perfInfo) {
-        if (self.crossOriginIsolated) {
-            perfIcon.textContent = "🔥";
-            perfInfo.textContent = "🚀 High-performance mode: active. GPU acceleration and multi-threading are enabled for maximum processing speed.";
-        } else {
-            perfIcon.textContent = "⚠️";
-            perfInfo.textContent = "🐢 Compatibility mode: isolated environment features are unavailable. OCR performance is reduced.";
-        }
-        perfIcon.onclick = () => {
+        const updatePerfUI = () => {
+            const isIsolated = self.crossOriginIsolated;
+            perfIcon.textContent = isIsolated ? "🔥" : "⚠️";
+            
+            const mem = getMemoryStats();
+            const statusMsg = isIsolated 
+                ? "🚀 High-performance mode: active. GPU and multi-threading enabled."
+                : "🐢 Compatibility mode: isolated features unavailable. Performance reduced.";
+
+            perfInfo.innerHTML = `
+                <div style="font-size: 13px; margin-bottom: 8px; line-height: 1.4;">${statusMsg}</div>
+                <div id="perf-advanced-toggle" style="font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; margin-bottom: 5px;">
+                    ${perfStats.showAdvanced ? "Hide Advanced Stats" : "Show Advanced Stats"}
+                </div>
+                <div id="perf-advanced-content" style="display: ${perfStats.showAdvanced ? 'block' : 'none'}; border-top: 1px solid var(--border); padding-top: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-family: monospace; font-size: 11px;">
+                        <span>Inference:</span> <span>${perfStats.inference.toFixed(1)}ms</span>
+                        <span>Pre-proc:</span> <span>${perfStats.preprocess.toFixed(1)}ms</span>
+                        ${mem ? `
+                        <span>Used Heap:</span> <span>${mem.used}MB</span>
+                        <span>Heap Limit:</span> <span>${mem.limit}MB</span>
+                        ` : `<span>Memory:</span> <span>Unavailable</span>`}
+                    </div>
+                </div>
+            `;
+
+            const toggle = perfInfo.querySelector('#perf-advanced-toggle');
+            if (toggle) {
+                toggle.onclick = (e) => {
+                    e.stopPropagation();
+                    perfStats.showAdvanced = !perfStats.showAdvanced;
+                    updatePerfUI();
+                };
+            }
+        };
+
+        updatePerfUI();
+        window.updatePerformanceStatus = updatePerfUI;
+
+        perfIcon.onclick = (e) => {
+            e.stopPropagation();
             perfInfo.style.display = (perfInfo.style.display === "none") ? "block" : "none";
+            if (perfInfo.style.display === "block") updatePerfUI();
         };
     }
 

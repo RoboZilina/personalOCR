@@ -694,19 +694,16 @@ function stopCapture() {
     selectWindowBtn.textContent = 'Select Window Source';
 }
 
-if (selectWindowBtn) selectWindowBtn.onclick = () => videoStream ? stopCapture() : startCapture();
+// Event binding moved to initEventListeners()
 
-// ==========================================
-// 3. Selection Overlay Logic
-// ==========================================
-
-if (selectionOverlay) {
+function setupSelectionOverlay() {
+    if (!selectionOverlay) return;
     const ctx = selectionOverlay.getContext('2d');
     let isSelecting = false, startX = 0, startY = 0, currentX = 0, currentY = 0;
     const resizeCanvas = () => {
         selectionOverlay.width = selectionOverlay.clientWidth;
         selectionOverlay.height = selectionOverlay.clientHeight;
-        if (selectionRect) drawSelectionRect();
+        if (selectionRect) window.drawSelectionRect();
     };
     new ResizeObserver(resizeCanvas).observe(selectionOverlay);
 
@@ -848,30 +845,6 @@ function checkAutoCapture() {
         }
     }
     lastScoutData = new Uint32Array(currentData);
-}
-
-if (autoToggle) {
-    autoToggle.onchange = () => {
-        const label = autoToggle.nextElementSibling;
-        setSetting('autoCapture', autoToggle.checked);
-        if (autoToggle.checked) {
-            if (label) label.textContent = "auto re-capture ON";
-            if (autoCaptureTimer) clearInterval(autoCaptureTimer);
-            
-            // Gold v3.1 Guard: Prevent recursive reloads during side-menu interactions
-            (async () => {
-                if (!EngineManager.isReady()) {
-                    await switchEngineModular(EngineManager.getInfo().id || engineSelector?.value || "tesseract");
-                }
-                autoCaptureTimer = setInterval(checkAutoCapture, 500);
-            })();
-        } else {
-            if (label) label.textContent = "auto re-capture OFF";
-            clearInterval(autoCaptureTimer);
-            if (stabilityTimer) clearTimeout(stabilityTimer); // Gold v3.1 Phantom Cleanup
-            autoToggle.parentElement.classList.remove('active');
-        }
-    };
 }
 
 // ==========================================
@@ -1653,41 +1626,6 @@ function addOCRResultToUI(text, confidence = null) {
     }
 }
 
-if (clearHistoryBtn) {
-    clearHistoryBtn.onclick = () => {
-        if (historyContent) historyContent.innerHTML = '';
-        if (latestText) latestText.textContent = 'Waiting for capture...';
-        localStorage.removeItem('vn-ocr-public-history-v2');
-        localStorage.removeItem('vn-ocr-public-history');
-    };
-}
-
-if (refreshOcrBtn) {
-    refreshOcrBtn.onclick = async () => {
-        if (!selectionRect) return;
-
-        // Throttled Manual Capture (Patch v2.5)
-        if (captureLocked || !engineReady) {
-            console.warn("[UI] Capture ignored — button is locked or engine not ready.");
-            return;
-        }
-
-        captureLocked = true;
-        updateCaptureButtonState();
-
-        try {
-            await captureFrame(selectionRect);
-        } finally {
-            // Standard UX Cooldown
-            setTimeout(() => {
-                captureLocked = false;
-                updateCaptureButtonState();
-            }, 300);
-        }
-    };
-}
-if (autoCaptureBtn) autoCaptureBtn.onclick = () => autoToggle?.click();
-
 function openUserGuide() {
     const helpModal = document.getElementById('help-modal');
     if (helpModal) {
@@ -2122,16 +2060,76 @@ async function globalInitialize() {
     }
 
 
+    // Phase 4: Consolidate Event Listeners (Fix for Race Conditions)
+    initEventListeners();
 }
 
-// Gold v3.1 Hardening: Absolute Hydration Safety
-document.addEventListener('DOMContentLoaded', globalInitialize);
+/** 6.6 UI Interaction Registry (Hydration Safety) */
+function initEventListeners() {
+    // 1. Screen Capture Controls
+    if (selectWindowBtn) {
+        selectWindowBtn.onclick = () => videoStream ? stopCapture() : startCapture();
+    }
 
-/* ========================================== */
-/* PHASE 6 — HAMBURGER MENU MIRROR            */
-/* ========================================== */
+    // 2. Selection Overlay
+    setupSelectionOverlay();
 
-(function () {
+    // 3. Main Toolbar
+    if (refreshOcrBtn) {
+        refreshOcrBtn.onclick = async () => {
+            if (captureLocked || isProcessing) return;
+            captureLocked = true;
+            updateCaptureButtonState();
+            try { await captureFrame(); } finally {
+                setTimeout(() => { captureLocked = false; updateCaptureButtonState(); }, 300);
+            }
+        };
+    }
+
+    if (clearHistoryBtn) {
+        clearHistoryBtn.onclick = () => {
+            if (confirm("Clear all transcription history?")) {
+                if (historyContent) historyContent.innerHTML = '';
+                setSetting('history', []);
+            }
+        };
+    }
+
+    if (autoCaptureBtn) {
+        autoCaptureBtn.onclick = () => autoToggle?.click();
+    }
+    
+    if (speakLatestBtn) {
+        speakLatestBtn.onclick = () => {
+            const text = latestText?.textContent;
+            if (text && text !== 'Waiting for capture...') {
+                speakText(text);
+            }
+        };
+    }
+
+    // 4. Engine & Settings Sync
+    if (engineSelector) {
+        engineSelector.onchange = switchEngineModular;
+    }
+    
+    if (autoToggle) {
+        autoToggle.onchange = (e) => {
+            setSetting('autoCapture', e.target.checked);
+            applySettingsToUI();
+        };
+    }
+
+    if (upscaleSlider) {
+        upscaleSlider.oninput = (e) => {
+            if (upscaleVal) upscaleVal.textContent = parseFloat(e.target.value).toFixed(1);
+        };
+        upscaleSlider.onchange = (e) => {
+            setSetting('upscale', parseFloat(e.target.value));
+        };
+    }
+
+    // 5. Sidebar Menu (Hamburger Logic)
     const menuBtn = document.getElementById('menu-btn');
     const sideMenu = document.getElementById('side-menu');
     const menuBackdrop = document.getElementById('menu-backdrop');
@@ -2141,80 +2139,60 @@ document.addEventListener('DOMContentLoaded', globalInitialize);
     const menuReset = document.getElementById('menu-reset');
 
     const openMenu = () => {
-        if (sideMenu) sideMenu.classList.add('open');
-        if (menuBackdrop) menuBackdrop.classList.add('open');
+        sideMenu?.classList.add('open');
+        menuBackdrop?.classList.add('open');
     };
-
     const closeMenu = () => {
-        if (sideMenu) sideMenu.classList.remove('open');
-        if (menuBackdrop) menuBackdrop.classList.remove('open');
+        sideMenu?.classList.remove('open');
+        menuBackdrop?.classList.remove('open');
     };
 
     if (menuBtn) menuBtn.onclick = openMenu;
     if (menuBackdrop) menuBackdrop.onclick = (e) => { e.stopPropagation(); closeMenu(); };
-
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeMenu();
-    });
+    
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
     if (menuInstall) menuInstall.onclick = () => {
-        const it = document.getElementById('install-btn');
-        if (it) it.click();
+        document.getElementById('install-btn')?.click();
         closeMenu();
     };
 
-    const openGuide = () => {
-        if (getSetting('debug')) console.debug("[MENU] Opening User Guide...");
-        openUserGuide();
-    };
-
-    const openContact = () => {
-        if (getSetting('debug')) console.debug("[MENU] Opening GitHub Issues Page...");
-        window.open('https://github.com/RoboZilina/personalOCR/issues/new', '_blank', 'noopener,noreferrer');
-    };
-
     if (menuGuide) menuGuide.onclick = () => {
-        openGuide();
+        openUserGuide();
         closeMenu();
     };
 
     if (menuContact) menuContact.onclick = () => {
-        openContact();
+        window.open('https://github.com/RoboZilina/personalOCR/issues/new', '_blank', 'noopener,noreferrer');
         closeMenu();
     };
 
     if (menuReset) menuReset.onclick = () => {
-        if (confirm("Reset all UI settings to defaults? (This will not switch your current OCR engine)")) {
+        if (confirm("Reset all UI settings to defaults?")) {
             resetSettings();
             closeMenu();
         }
     };
 
     const subItemBtns = document.querySelectorAll('.menu-subitem-btn');
-    if (subItemBtns) {
-        subItemBtns.forEach(btn => {
-            btn.onclick = (e) => {
-                const setting = btn.dataset.setting;
-                let val = btn.dataset.value;
-                if (setting && val) {
-                    if (val === "true") val = true;
-                    if (val === "false") val = false;
-
-                    setSetting(setting, val);
-
-                    // Specific toggle syncs for core logic if needed
-                    if (setting === 'autoCapture') {
-                        const at = document.getElementById('auto-capture-toggle');
-                        if (at && at.checked !== val) at.click();
-                    }
-
-                    applySettingsToUI();
-                    closeMenu();
+    subItemBtns?.forEach(btn => {
+        btn.onclick = (e) => {
+            const setting = btn.dataset.setting;
+            let val = btn.dataset.value;
+            if (setting && val) {
+                if (val === "true") val = true;
+                if (val === "false") val = false;
+                setSetting(setting, val);
+                if (setting === 'autoCapture') {
+                    const at = document.getElementById('auto-capture-toggle');
+                    if (at && at.checked !== val) at.click();
                 }
-            };
-        });
-    }
-})();
+                applySettingsToUI();
+                closeMenu();
+            }
+        };
+    });
+}
 
 /** Public API Namespace (Auditability Phase) */
 window.VNOCR = {
@@ -2224,6 +2202,9 @@ window.VNOCR = {
     captureFrame: window.captureFrame,
     switchEngine: window.switchEngine
 };
+
+// Gold v3.1 Hardening: Absolute Hydration Safety
+document.addEventListener('DOMContentLoaded', globalInitialize);
 
 
 

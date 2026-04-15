@@ -46,6 +46,21 @@ import { MangaOCREngine } from './js/manga/manga_engine.js';
 
 /** Unified Readiness API (Hardening Phase) */
 
+/**
+ * 1. STATUS REGISTRY (Gold v3.7 Logic Stabilization)
+ * Centralizes all engine states to prevent string drift.
+ */
+const STATUS = {
+    IDLE: 'idle',
+    PRE_LOADING: 'pre-loading',
+    DOWNLOADING: 'downloading',
+    LOADING: 'loading',
+    WARMING: 'warming-up',
+    READY: 'ready',
+    PROCESSING: 'processing',
+    ERROR: 'error'
+};
+
 
 
 // ==========================================

@@ -77,6 +77,7 @@ export class MangaOCREngine {
         try {
             this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading manifest…', 0.1);
             const manifestRes = await fetch(this.manifestUrl);
+            if (!manifestRes.ok) throw new Error(`MangaOCR: Manifest load failed (${manifestRes.status})`);
             const manifest = await manifestRes.json();
             
             const modelBase = "./models/manga/";
@@ -92,6 +93,10 @@ export class MangaOCREngine {
                 fetch(modelBase + manifest.config.path),
                 fetch(modelBase + manifest.preprocessor.path)
             ]);
+
+            if (!vocabRes.ok) throw new Error("MangaOCR: Vocabulary fetch failed");
+            if (!configRes.ok) throw new Error("MangaOCR: Configuration fetch failed");
+            if (!preprocRes.ok) throw new Error("MangaOCR: Preprocessor fetch failed");
 
             this.vocab = await vocabRes.json();
             const config = await configRes.json();
@@ -124,6 +129,7 @@ export class MangaOCREngine {
             decoderBuffer = null;
 
             // Initialize optimization buffers (Patch v2.1.8)
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] MangaOCR → INITIALIZING BUFFERS`);
             if (!this.decoderTokenBuffer) {
                 this.decoderTokenBuffer = new BigInt64Array(this.decoderMaxLength);
             }
@@ -133,11 +139,12 @@ export class MangaOCREngine {
             }
 
             this.isLoaded = true;
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] MangaOCR → ${S.READY}`);
             this.reportStatus(S.READY, '🟢 MangaOCR: ready.');
         } catch (err) {
             console.error("[MANGA-ERROR] Engine Load Failed:", err);
             this.isLoaded = false;
-            this.reportStatus(S.ERROR, '🔴 MangaOCR Load Failed');
+            this.reportStatus(S.ERROR, `🔴 MangaOCR: ${err.message || 'Load Failed'}`);
             throw err;
         }
     }
@@ -244,6 +251,7 @@ export class MangaOCREngine {
             return { text: '' };
         }
 
+        const start = performance.now();
         try {
             this.busy = true;
             const pixelValues = this._preprocessToTensor(sourceCanvas);
@@ -271,13 +279,20 @@ export class MangaOCREngine {
             }
 
             const text = this._decode(generatedTokens);
+
+            if (window.VNOCR_DEBUG) {
+                const elapsed = (performance.now() - start).toFixed(1);
+                console.debug(`[ENGINE] MangaOCR inference took ${elapsed}ms`);
+            }
+
             return { text, confidence: 0.95 };
         } catch (err) {
             console.error("[ENGINE] MangaOCR Inference Error:", err);
             return { text: '' };
         } finally {
+            if (window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] MangaOCR: Double-release of busy flag detected!`);
             this.busy = false;
-            if (window.VNOCR_DEBUG) console.debug("[ENGINE] MangaOCR busy flag released");
+            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] MangaOCR busy flag released`);
         }
     }
 

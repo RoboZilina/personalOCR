@@ -157,6 +157,11 @@ const EngineManager = (() => {
         return () => statusListeners.delete(listener);
     }
 
+    // Subscribe to specific events (Convenience Wrappers)
+    function onReady(fn) { listeners.ready.push(fn); return () => { listeners.ready = listeners.ready.filter(f => f !== fn); }; }
+    function onLoading(fn) { listeners.loading.push(fn); return () => { listeners.loading = listeners.loading.filter(f => f !== fn); }; }
+    function onError(fn) { listeners.error.push(fn); return () => { listeners.error = listeners.error.filter(f => f !== fn); }; }
+
     function emit(type, payload) {
         if (listeners[type]) {
             listeners[type].forEach(fn => fn(payload));
@@ -204,14 +209,17 @@ const EngineManager = (() => {
             const deps = { reportStatus: notifyStatus };
             currentEngine = registryEntry.factory(deps);
 
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.LOADING}`);
             if (currentEngine && typeof currentEngine.load === 'function') {
                 await currentEngine.load();
             }
 
             isReady = true;
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.READY}`);
             notifyStatus('ready', `🟢 ${currentLabel?.toUpperCase() || 'OCR'} READY`);
             return currentEngine;
         } catch (err) {
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.ERROR}`);
             isReady = false;
             notifyStatus('error', '🔴 Load Failed');
             throw err;
@@ -1088,12 +1096,13 @@ async function captureFrame(rect = null) {
 
             try {
                 // Report slice progress (Gold v3.7)
+                if (window.VNOCR_DEBUG) console.debug(`[GEN ${myGen}] Processing slice ${i + 1}/${canvases.length}`);
                 setOCRStatus(STATUS.PROCESSING, `Processing (${i + 1}/${canvases.length})`, (i+1)/canvases.length);
                 
                 const result = await EngineManager.runOCR(clean);
                 inferenceResults.push(result);
             } catch (error) {
-                console.error("[INFERENCE-ERROR] Execution failed for slice:", i, error);
+                console.error(`[GEN ${myGen}] [INFERENCE-ERROR] Execution failed for slice:`, i, error);
                 EngineManager.emitError(error);
                 inferenceResults.push({ text: EngineManager.handleError(error), confidence: null });
             }
@@ -1161,8 +1170,11 @@ async function captureFrame(rect = null) {
 
         // Small cooldown to prevent rapid-fire re-triggering
         setTimeout(() => {
+            if (window.VNOCR_DEBUG) {
+                if (!isProcessing) console.warn(`[${new Date().toISOString()}] [CAPTURE] Double-release detected for Gen ${myGen}`);
+                console.debug(`[${new Date().toISOString()}] [CAPTURE] Lock released: Gen ${myGen}`);
+            }
             isProcessing = false;
-            if (window.VNOCR_DEBUG) console.debug(`[CAPTURE] Lock released: Gen ${myGen}`);
             if (EngineManager.isReady()) {
                 setOCRStatus('ready', EngineManager.getReadyStatus());
             }

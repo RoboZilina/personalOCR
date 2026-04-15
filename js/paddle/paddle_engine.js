@@ -120,23 +120,29 @@ export class PaddleOCR {
             recBuffer = null; // Memory Guard: Release buffer
 
             // Load dictionary
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${S.LOADING} (Dictionary)`);
             this.reportStatus(S.LOADING, '🟡 PaddleOCR: loading dictionary…', 0.95);
-            const dictRes = await fetch(modelBase + this.manifest.dict.path);
+            const dictPath = this.manifest.dict.remote_url || (modelBase + this.manifest.dict.path);
+            const dictRes = await fetch(dictPath);
+            if (!dictRes.ok) throw new Error(`PaddleOCR: Dictionary load failed with status ${dictRes.status}`);
+            
             const dictText = await dictRes.text();
-            this.dict = dictText.split(/\r?\n/);
+            this.dict = dictText.split(/\r?\n/).map(line => line.trim());
             if (this.dict.length > 0 && this.dict[this.dict.length - 1] === "") {
                 this.dict.pop();
             }
 
             // Warm-up WebGPU Shaders (if active)
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${S.WARMING}`);
             this.reportStatus(S.WARMING, '🟡 PaddleOCR: warming up…', 0.98);
             await this.warmUp();
 
             this.isLoaded = true;
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${S.READY}`);
             this.reportStatus(S.READY, '🟢 PaddleOCR: ready.');
         } catch (err) {
             console.error("PaddleOCR: Load Error:", err);
-            this.reportStatus('error', '🔴 PaddleOCR: Load Failed.');
+            this.reportStatus(S.ERROR, `🔴 PaddleOCR: ${err.message || 'Load Failed'}`);
             throw err;
         }
     }
@@ -295,6 +301,7 @@ export class PaddleOCR {
             return { text: '' };
         }
 
+        const start = performance.now();
         try {
             this.busy = true;
             const inputSize = this.manifest.rec.input_size || [48, 320];
@@ -328,6 +335,11 @@ export class PaddleOCR {
 
             const text = this._ctcGreedyDecode(logits, dims);
             
+            if (window.VNOCR_DEBUG) {
+                const elapsed = (performance.now() - start).toFixed(1);
+                console.debug(`[ENGINE] PaddleOCR inference took ${elapsed}ms`);
+            }
+
             // Memory Cleanup
             feeds[this.recSession.inputNames[0]] = null;
             logits = null;
@@ -337,8 +349,9 @@ export class PaddleOCR {
             console.error("[ENGINE] PaddleOCR Inference Error:", err);
             return { text: '' };
         } finally {
+            if (window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] PaddleOCR: Double-release of busy flag detected!`);
             this.busy = false;
-            if (window.VNOCR_DEBUG) console.debug("[ENGINE] PaddleOCR busy flag released");
+            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] PaddleOCR busy flag released`);
         }
     }
 

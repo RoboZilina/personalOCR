@@ -2120,7 +2120,7 @@ function initEventListeners() {
 
     // 4. Engine & Settings Sync
     if (engineSelector) {
-        engineSelector.onchange = switchEngineModular;
+        engineSelector.onchange = (e) => switchEngineModular(e.target.value);
     }
     
     if (autoToggle) {

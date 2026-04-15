@@ -57,7 +57,7 @@ export class TesseractEngine {
             this.worker = await Tesseract.createWorker(actualLang, 1, {
                 langPath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/',
                 workerPath: './js/tesseract/worker.min.js',
-                corePath: 'https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev/tesseract/',
+                corePath: './js/tesseract/core/',
                 gzip: useGzip,
                 logger: m => {
                     if (m.status === 'loading language traineddata') {

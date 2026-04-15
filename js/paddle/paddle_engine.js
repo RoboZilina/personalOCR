@@ -294,9 +294,9 @@ export class PaddleOCR {
             console.warn("[ENGINE] PaddleOCR: Inference skipped — session is busy.");
             return { text: '' };
         }
-        this.busy = true;
 
         try {
+            this.busy = true;
             const inputSize = this.manifest.rec.input_size || [48, 320];
             const [h, w] = inputSize;
 
@@ -327,15 +327,18 @@ export class PaddleOCR {
             }
 
             const text = this._ctcGreedyDecode(logits, dims);
-
             
             // Memory Cleanup
             feeds[this.recSession.inputNames[0]] = null;
             logits = null;
             
             return text;
+        } catch (err) {
+            console.error("[ENGINE] PaddleOCR Inference Error:", err);
+            return { text: '' };
         } finally {
             this.busy = false;
+            if (window.VNOCR_DEBUG) console.debug("[ENGINE] PaddleOCR busy flag released");
         }
     }
 

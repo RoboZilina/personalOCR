@@ -999,6 +999,7 @@ async function captureFrame(rect = null) {
     if (!rect && !window.selectionRect) return; 
     
     if (isProcessing) return; // Prevent overlapping cycles (Gold v3.1)
+    isProcessing = true;
     const myGen = ++captureGeneration;
     logTrace(`Capture started. Gen: ${myGen}`);
 
@@ -1161,6 +1162,7 @@ async function captureFrame(rect = null) {
         // Small cooldown to prevent rapid-fire re-triggering
         setTimeout(() => {
             isProcessing = false;
+            if (window.VNOCR_DEBUG) console.debug(`[CAPTURE] Lock released: Gen ${myGen}`);
             if (EngineManager.isReady()) {
                 setOCRStatus('ready', EngineManager.getReadyStatus());
             }

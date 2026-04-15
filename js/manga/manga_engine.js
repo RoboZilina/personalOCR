@@ -243,52 +243,62 @@ export class MangaOCREngine {
             console.warn("[ENGINE] MangaOCR: Inference skipped — session is busy.");
             return { text: '' };
         }
-        this.busy = true;
 
         try {
+            this.busy = true;
             const pixelValues = this._preprocessToTensor(sourceCanvas);
 
             const encoderFeeds = { pixel_values: pixelValues };
             const encoderResults = await this.encoderSession.run(encoderFeeds);
             const encoderHiddenStates = encoderResults.last_hidden_state;
 
-            let generatedTokens = [this.BOS_TOKEN_ID]; // Using fixed BOS_TOKEN_ID!
+            let generatedTokens = [this.BOS_TOKEN_ID];
 
             for (let step = 0; step < this.MAX_LENGTH; step++) {
                 const pos = generatedTokens.length;
                 this.decoderTokenBuffer[pos - 1] = BigInt(generatedTokens[pos - 1]);
                 
-                const inputIdsTensor = new ort.Tensor('int64', this.decoderTokenBuffer.subarray(0, pos), [1, pos]);
-
                 const decoderFeeds = {
-                    input_ids: inputIdsTensor,
+                    input_ids: new ort.Tensor('int64', this.decoderTokenBuffer.subarray(0, pos), [1, pos]),
                     encoder_hidden_states: encoderHiddenStates
                 };
 
                 const decoderResults = await this.decoderSession.run(decoderFeeds);
-                const logits = decoderResults.logits; 
-                const nextToken = this._greedyChoice(logits);
+                const nextTokenId = this._greedyChoice(decoderResults.logits);
 
-                if (nextToken === this.EOS_TOKEN_ID) {
-                    break;
-                }
-                generatedTokens.push(nextToken);
+                if (nextTokenId === this.EOS_TOKEN_ID) break;
+                generatedTokens.push(nextTokenId);
             }
 
-            const chars = generatedTokens.map(t => this.vocab[t] || '');
-            let text = chars.join('').replace(/ /g, '').replace(/<[^>]+>/g, '');
-
-            // Ensure ViT system tokens like [CLS] and [SEP] are stripped. 
-            // We use literal replaces instead of global bracket matching to protect in-game brackets.
-            text = text.replace(/\[CLS\]/g, '').replace(/\[SEP\]/g, '').replace(/\[PAD\]/g, '').replace(/\[UNK\]/g, '');
-
-            text = text.replace(/\u2026/g, '...'); 
-            text = text.replace(/[・.]{2,}/g, m => '.'.repeat(m.length));
-            text = text.replace(/\s+/g, '');                              // strip whitespace
-            return { text };
+            const text = this._decode(generatedTokens);
+            return { text, confidence: 0.95 };
+        } catch (err) {
+            console.error("[ENGINE] MangaOCR Inference Error:", err);
+            return { text: '' };
         } finally {
             this.busy = false;
+            if (window.VNOCR_DEBUG) console.debug("[ENGINE] MangaOCR busy flag released");
         }
+    }
+
+    /**
+     * Converts token IDs back to a string using the vocabulary.
+     * @param {Array<number>} tokens - Array of token IDs
+     * @returns {string} The decoded Japanese text
+     */
+    _decode(tokens) {
+        if (!this.vocab) return "";
+        
+        const chars = tokens.map(t => this.vocab[t] || '');
+        let text = chars.join('').replace(/ /g, '').replace(/<[^>]+>/g, '');
+
+        // Stripping system tokens
+        text = text.replace(/\[CLS\]/g, '').replace(/\[SEP\]/g, '').replace(/\[PAD\]/g, '').replace(/\[UNK\]/g, '');
+        text = text.replace(/\u2026/g, '...'); 
+        text = text.replace(/[・.]{2,}/g, m => '.'.repeat(m.length));
+        text = text.replace(/\s+/g, ''); // strip whitespace
+        
+        return text;
     }
 
     /**

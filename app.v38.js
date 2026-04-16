@@ -69,12 +69,44 @@ import {
 
 import {
     runPaddleOCR
-} from './js/paddle/paddle_core.js';
+} from './js/paddle/paddle_core.js?v=gold_3.8.3';
 
-import { TesseractEngine } from './js/tesseract/tesseract_engine.js';
-import { PaddleOCR } from './js/paddle/paddle_engine.v38.js';
-import { MangaOCREngine } from './js/manga/manga_engine.js';
-import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js';
+import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=gold_3.8.3';
+import { PaddleOCR } from './js/paddle/paddle_engine.v38.js?v=gold_3.8.3';
+import { MangaOCREngine } from './js/manga/manga_engine.js?v=gold_3.8.3';
+import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=gold_3.8.3';
+
+const splashHints = [
+    "PaddleOCR: Highest accuracy, but longest warm-up time.",
+    "MangaOCR uses large models and requires more memory.",
+    "MangaOCR is optimized for manga bubbles, not VN UI text.",
+    "Tesseract is fastest and works best on clean VN text boxes.",
+    "Increase VN text box opacity for better OCR accuracy.",
+    "High-contrast text improves recognition across all engines.",
+    "Enable text outline or shadow in your VN if available.",
+    "Lightweight Mode skips heavy engine preloading for faster startup.",
+    "Use Lightweight Mode if Tesseract reads your VN reliably.",
+    "Increase Tesseract Upscale Factor for sharper input.",
+    "Disable Auto-Capture if your VN has frequent transitions.",
+    "Enable Auto-Copy to send OCR results directly to clipboard.",
+    "Use the History Panel to compare previous OCR outputs.",
+    "WebGPU acceleration works only in supported browsers.",
+    "Multithreading improves performance on modern CPUs.",
+    "For issues, use the Contact form. Lite version available."
+];
+
+function startSplashHintRotation() {
+    const hintEl = document.getElementById("splash-hint");
+    if (!hintEl) return;
+
+    let idx = 0;
+    hintEl.textContent = splashHints[idx];
+
+    setInterval(() => {
+        idx = (idx + 1) % splashHints.length;
+        hintEl.textContent = splashHints[idx];
+    }, 3500); // 3.5 seconds
+}
 
 /** Unified Readiness API (Hardening Phase) */
 
@@ -108,6 +140,8 @@ let isProcessing = false; // Unified state tracking for OCR cycles
 let switchingLock = false; // Prevent overlapping engine switches (Gold v3.8)
 
 // 0. Emergency Safety Boundary: Register immediately at module load (Refined v3.8)
+startSplashHintRotation();
+
 setTimeout(() => {
     const splash = document.getElementById('startup-splash');
     // Pure JS Truth Flag: Only trigger if the splash hasn't been dismissed by the main logic
@@ -2296,7 +2330,6 @@ async function globalInitialize() {
             }).catch(e => console.warn('SW registration failed:', e));
         }
     }
-    */
 }
 
 /** 6.6 UI Interaction Registry (Hydration Safety) */

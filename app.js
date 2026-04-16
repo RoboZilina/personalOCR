@@ -2112,8 +2112,8 @@ async function globalInitialize() {
                         <span>Inference:</span> <span>${perfStats.inference.toFixed(1)}ms</span>
                         <span>Pre-proc:</span> <span>${perfStats.preprocess.toFixed(1)}ms</span>
                         ${mem ? `
-                        <span>Used Heap:</span> <span>${mem.used}MB</span>
-                        <span>Heap Limit:</span> <span>${mem.limit}MB</span>
+                        <span>Memory Used:</span> <span>${mem.used}MB</span>
+                        <span>Max Memory:</span> <span>${mem.limit}MB</span>
                         ` : `<span>Memory:</span> <span>Unavailable</span>`}
                     </div>
                 </div>

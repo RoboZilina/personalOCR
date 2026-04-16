@@ -250,16 +250,16 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
 /* STATUS ELEMENTS */
 /* Progress Pill v2: Premium UX (Glassmorphism + State Machine) */
 .status-pill { 
-    font-size: 11px; 
+    font-size: 13px; 
     font-weight: 700;
-    letter-spacing: 0.2px;
-    background: rgba(13, 13, 16, 0.6); 
+    letter-spacing: 0.3px;
+    background: rgba(13, 13, 16, 0.8); 
     color: var(--text-dim); 
-    padding: 6px 14px; 
+    padding: 8px 18px; 
     border-radius: 20px; 
     border: 1px solid var(--border); 
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
     position: relative;
     overflow: hidden;
@@ -267,7 +267,7 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
 }
 
 /* Hardened Progress Layer */

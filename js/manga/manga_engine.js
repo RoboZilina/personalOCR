@@ -1,41 +1,9 @@
-import { isWebGPUSupported } from '../onnx/onnx_support.js';
+import { isWebGPUSupported } from '../onnx/onnx_support.js?v=gold_3.8.4';
+import { fetchWithProgress } from '../utils/fetch_utils.js?v=gold_3.8.4';
 
 /**
- * Local Restoration Utility: fetchWithProgress
- * Defined locally to bypass cross-module caching issues in the current runtime environment.
+ * MangaOCR Engine v3.8.4
  */
-async function fetchWithProgress(url, onProgress) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
-
-    const contentLength = response.headers.get('Content-Length');
-    if (!contentLength) {
-        const buffer = await response.arrayBuffer();
-        if (onProgress) onProgress(1);
-        return buffer;
-    }
-
-    const total = parseInt(contentLength, 10);
-    let loaded = 0;
-    const reader = response.body.getReader();
-    const chunks = [];
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        if (onProgress) onProgress(loaded / total);
-    }
-
-    const all = new Uint8Array(loaded);
-    let pos = 0;
-    for (const chunk of chunks) {
-        all.set(chunk, pos);
-        pos += chunk.length;
-    }
-    return all.buffer;
-}
 
 const M_STATUS = {
     IDLE: 'idle',

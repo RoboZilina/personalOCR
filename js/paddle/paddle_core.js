@@ -1,41 +1,4 @@
-// Shared canvas to reduce GC pressure
-const sharedCanvas = document.createElement('canvas');
-const sharedCtx = sharedCanvas.getContext('2d', { willReadFrequently: true });
-
-// Pre-allocated buffers for common OCR sizes to reduce allocation churn
-let detInputBuffer = null;
-let recInputBuffer = null;
-
-// url: string, onProgress: (fraction: number) => void
-export async function fetchWithProgress(url, onProgress) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
-
-    const contentLength = response.headers.get('Content-Length');
-    if (!contentLength) {
-        const buffer = await response.arrayBuffer();
-        if (onProgress) onProgress(1);
-        return buffer;
-    }
-
-    const total = parseInt(contentLength, 10);
-    let loaded = 0;
-    const reader = response.body.getReader();
-    const chunks = [];
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.byteLength;
-        if (onProgress) onProgress(loaded / total);
-    }
-
-    const blob = new Blob(chunks);
-    const buffer = await blob.arrayBuffer();
-    if (onProgress) onProgress(1);
-    return buffer;
-}
+export { fetchWithProgress } from '../utils/fetch_utils.js?v=gold_3.8.4';
 
 // canvas: HTMLCanvasElement, inputSize: [H, W], normalize: { mean: number[], std: number[] }, outBuffer: Float32Array (optional)
 export function canvasToFloat32Tensor(canvas, inputSize, normalize, outBuffer) {

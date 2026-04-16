@@ -69,12 +69,12 @@ import {
 
 import {
     runPaddleOCR
-} from './js/paddle/paddle_core.js?v=gold_3.8.3';
+} from './js/paddle/paddle_core.js?v=gold_3.8.4';
 
-import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=gold_3.8.3';
-import { PaddleOCR } from './js/paddle/paddle_engine.v38.js?v=gold_3.8.3';
-import { MangaOCREngine } from './js/manga/manga_engine.js?v=gold_3.8.3';
-import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=gold_3.8.3';
+import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=gold_3.8.4';
+import { PaddleOCR } from './js/paddle/paddle_engine.v38.js?v=gold_3.8.4';
+import { MangaOCREngine } from './js/manga/manga_engine.js?v=gold_3.8.4';
+import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=gold_3.8.4';
 
 const splashHints = [
     "PaddleOCR: Highest accuracy, but longest warm-up time.",
@@ -182,7 +182,7 @@ const engines = {
         postprocess: (results) => results.join(' ').trim(),
         handleError: (error) => { console.error(error); return "[Tesseract Error]"; },
         isMultiLine: false,
-        readyStatus: '🟢 OCR Ready'
+        readyStatus: 'Ready'
     },
     paddle: {
         factory: (deps) => new PaddleOCR(
@@ -206,7 +206,7 @@ const engines = {
         },
         handleError: (error) => { console.error(error); return "[PaddleOCR Error]"; },
         isMultiLine: true,
-        readyStatus: '🟢 PaddleOCR Ready'
+        readyStatus: 'Ready'
     },
     manga: {
         factory: (deps) => new MangaOCREngine(
@@ -224,7 +224,7 @@ const engines = {
         postprocess: (results) => results.join('').trim(),
         handleError: (error) => { console.error(error); return "[MangaOCR Error]"; },
         isMultiLine: false,
-        readyStatus: '🟢 MangaOCR Ready'
+        readyStatus: 'Ready'
     }
 };
 
@@ -235,15 +235,18 @@ const engines = {
 
 const EngineManager = (() => {
 
-    // Internal state placeholders
-    const engineCache = new Map(); // id -> engine instance
+    // Internal State Machine (Gold v3.8 Compliance)
+    const engineMetadata = new Map(); // id -> { instance, state, loadPromise }
+    let currentEngineId = 'tesseract'; // Default starting point
     let currentEngine = null;
-    let currentEngineId = null;
-    let currentLabel = null;
-    let currentCapabilities = {};
-    let currentInfo = {};
-    let engineState = 'idle'; 
     let switchingLock = false;
+
+    // Fixed Labels for Status Formatting
+    const ENGINE_LABELS = {
+        'tesseract': 'Tesseract',
+        'paddle': 'PaddleOCR',
+        'manga': 'MangaOCR'
+    };
 
     // Status listeners (UI will subscribe later)
     const statusListeners = new Set();
@@ -267,56 +270,79 @@ const EngineManager = (() => {
         }
     }
 
-    // Notify all listeners
-    function notifyStatus(state, text, progress = null) {
-        engineState = state;
-        if (state === STATUS.READY) emit('ready', text);
-        if (state === STATUS.LOADING || state === STATUS.DOWNLOADING) emit('loading', text);
-        if (state === STATUS.ERROR) emit('error', text);
+    /**
+     * Unified Status Broadcaster
+     * Formats outgoing text as "[Engine] — [Status]"
+     */
+    function notifyStatus(state, text, progress = null, targetId = null) {
+        const id = targetId || currentEngineId;
+        const label = ENGINE_LABELS[id] || id;
+        
+        // Format logic: Only prepend engine name if it's not already there
+        const statusText = text.includes('—') ? text : `${label} — ${text}`;
+
+        if (state === STATUS.READY) emit('ready', statusText);
+        if (state === STATUS.LOADING || state === STATUS.DOWNLOADING || state === STATUS.WARMING) emit('loading', statusText);
+        if (state === STATUS.ERROR) emit('error', statusText);
 
         for (const fn of statusListeners) {
-            try { fn({ state, text, progress, engineId: currentEngineId }); } catch { }
+            try { fn({ state, text: statusText, progress, engineId: id }); } catch { }
         }
     }
 
     /**
-     * Internal factory + loader with caching.
-     * @param {string} id - Engine ID from registry
-     * @param {boolean} isSilent - If true, status updates are not broadcast to UI
+     * State-Aware Engine Loader
+     * Implements promise deduplication and background readiness.
      */
     async function getOrLoadEngine(id, isSilent = false) {
-        // 1. Cache Hit
-        if (engineCache.has(id)) {
-            return engineCache.get(id);
-        }
-
-        const registryEntry = engines[id];
-        if (!registryEntry) {
-            throw new Error(`[ENGINE] No registry entry for: ${id}`);
-        }
-
-        // 2. Factory creation
-        const reporter = (state, text, progress) => {
-            // Only report to UI if we aren't preloading silently OR if this IS the active engine
-            if (!isSilent || id === currentEngineId) {
-                notifyStatus(state, text, progress);
-            }
-        };
-
-        const engine = registryEntry.factory({ reportStatus: reporter });
+        let meta = engineMetadata.get(id);
         
-        // 3. Load logic
-        if (engine && typeof engine.load === 'function') {
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Initializing ${id.toUpperCase()}...`);
-            await engine.load();
+        if (!meta) {
+            meta = { instance: null, state: 'not_loaded', loadPromise: null };
+            engineMetadata.set(id, meta);
         }
 
-        // 4. Warm-up (Deterministic JIT/Shader compilation)
-        await _warmUpEngine(engine, id);
+        // 1. Cache/Deduplication Hit
+        if (meta.state === 'ready') return meta.instance;
+        if (meta.state === 'loading') return meta.loadPromise;
 
-        // 5. Commit to cache
-        engineCache.set(id, engine);
-        return engine;
+        // 2. Start Loading Lifecycle
+        meta.state = 'loading';
+        meta.loadPromise = (async () => {
+            try {
+                const registryEntry = engines[id];
+                if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
+
+                const reporter = (state, text, progress) => {
+                    // Update internal state tracking
+                    if (state === STATUS.READY) meta.state = 'ready';
+                    
+                    // Broadcast to UI if active or forced
+                    if (!isSilent || id === currentEngineId) {
+                        notifyStatus(state, text, progress, id);
+                    }
+                };
+
+                const instance = registryEntry.factory({ reportStatus: reporter });
+                
+                if (instance && typeof instance.load === 'function') {
+                    await instance.load();
+                }
+
+                await _warmUpEngine(instance, id);
+
+                meta.instance = instance;
+                meta.state = 'ready';
+                meta.loadPromise = null; // Clear promise once resolved
+                return instance;
+            } catch (err) {
+                meta.state = 'error';
+                meta.loadPromise = null;
+                throw err;
+            }
+        })();
+
+        return meta.loadPromise;
     }
 
     async function _warmUpEngine(engine, id) {
@@ -345,34 +371,30 @@ const EngineManager = (() => {
         switchingLock = true;
 
         try {
-            // Priority: Update identity state so any load progress targets the correct ID
+            // Identity First (Enables correct status pill target)
             currentEngineId = id;
-            currentLabel = id;
             
-            // Get from cache or perform full init
-            const engine = await getOrLoadEngine(id);
-            currentEngine = engine;
+            const meta = engineMetadata.get(id);
+            if (!meta || meta.state !== 'ready') {
+                notifyStatus('loading', 'Loading…');
+            }
 
-            // Update Metadata (Derived from registry)
+            const instance = await getOrLoadEngine(id);
+            currentEngine = instance;
+
+            // Update Metadata for Pipeline compatibility
             currentCapabilities = {
                 supportsModes: registryEntry.supportsModes || false,
                 supportsMultiPass: registryEntry.supportsMultiPass || false,
                 isMultiLine: registryEntry.isMultiLine || false
             };
-            currentInfo = {
-                id: currentEngineId,
-                label: currentLabel,
-                capabilities: currentCapabilities
-            };
+            currentInfo = { id, capabilities: currentCapabilities };
 
             isReady = true;
-            notifyStatus('ready', getReadyStatus());
+            notifyStatus('ready', 'Ready');
             return currentEngine;
         } catch (err) {
             isReady = false;
-            // Recover identity on failure to prevent UI "stuck" state
-            currentEngineId = 'tesseract'; 
-            currentLabel = 'tesseract';
             notifyStatus('error', '🔴 Load Failed');
             throw err;
         } finally {
@@ -479,13 +501,17 @@ const EngineManager = (() => {
         return "[OCR Error]";
     }
 
+    // Initialize Defaults
+    engineMetadata.set('tesseract', { instance: null, state: 'ready', loadPromise: null });
+
     return {
         onReady, onLoading, onError, onStatusChange,
         switchEngine, preloadCoreEngines, disposeAllEngines,
         runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
+        getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
         getInfo: () => currentInfo,
-        getEngineInstance: () => currentEngine, // Added for pinning
+        getEngineInstance: () => currentEngine,
         getReadyStatus,
         emitError: (err) => emit('error', err),
         handleError: (err) => {
@@ -2220,40 +2246,38 @@ async function globalInitialize() {
         updatePerformanceStatus();
     }
 
-    // 4. Engine Stabilization
+    // 4. Silicon Seal Registry Initialization
+    // We strictly prioritize Tesseract to ensure the UI is functional within <500ms.
     const savedEngine = getSetting('ocrEngine') || 'tesseract';
 
     try {
-        // Pass 1: Primary load
-        await switchEngineModular(savedEngine);
+        // Step 1: Force immediate Tesseract readiness (anchors the interactive UI)
+        await switchEngineModular('tesseract');
+        
+        // Step 2: Cosmetic splash dismissal (Branding pass complete)
+        setTimeout(() => dismissSplashScreen(), 1000);
 
-        // Pass 2: Background secondary preloads
-        if (!getSetting('skipPreloading')) {
-            await EngineManager.preloadCoreEngines();
+        // Step 3: Silent background recovery of saved preference
+        // MangaOCR is explicitly excluded from background preloading per security/perf policy.
+        if (savedEngine === 'paddle') {
+            // We load silently to avoid hijacking the UI before readiness.
+            // The switch only happens ONCE the background promise fulfills.
+            EngineManager.getOrLoadEngine(savedEngine, true).then(() => {
+                if (window.VNOCR_DEBUG) console.log(`[BOOT] Silent upgrade to ${savedEngine} successful.`);
+                switchEngineModular(savedEngine); 
+            }).catch(err => {
+                console.warn(`[BOOT] Silent upgrade to ${savedEngine} failed:`, err);
+            });
         }
 
-        // Pass 3: State Sync (Hardened Null-Guards)
-        const engineInfo = EngineManager.getInfo() || {};
-        const caps = engineInfo.capabilities || {};
-        const supportsModes = !!caps.supportsModes;
-
-        let savedMode = getSetting('ocrMode');
-        const defaultMode = engines[savedEngine]?.defaultMode || 'default_mini';
-        if (!savedMode) savedMode = defaultMode;
-
-        if (modeSelector) {
-            modeSelector.value = savedMode;
-            modeSelector.disabled = !supportsModes;
+        // Step 4: Silent background preloads (Always warm up Paddle for zero-wait switching)
+        if (!getSetting('skipPreloading') && savedEngine !== 'paddle') {
+            EngineManager.getOrLoadEngine('paddle', true);
         }
 
-        if (engineSelector) {
-            engineSelector.value = savedEngine;
-        }
-
-        setOCRStatus('ready', savedEngine);
         applySettingsToUI();
 
-        // Pass 4: History Loading (Restore context)
+        // Step 5: History Loading (Restore context)
         if (historyContent) {
             const savedV2 = localStorage.getItem('vn-ocr-public-history-v2');
             if (savedV2) {
@@ -2287,14 +2311,9 @@ async function globalInitialize() {
 
     } catch (err) {
         console.error("[INIT] Neural Engine Stabilization Failed:", err);
-        const splashText = document.querySelector('#startup-splash .splash-text');
-        if (splashText) {
-            splashText.textContent = "System Ready (Initialization issues detected)";
-            splashText.style.color = "var(--warn)";
-        }
-        await new Promise(r => setTimeout(r, 1500));
+        dismissSplashScreen(); // Never lock the UI
     } finally {
-        dismissSplashScreen();
+        // Logic moved to Step 2 for speed
     }
 
     // 5. Post-Stabilization Observers

@@ -1,5 +1,5 @@
-import { fetchWithProgress, canvasToFloat32Tensor } from './paddle_core.js';
-import { isWebGPUSupported } from '../onnx/onnx_support.js';
+import { fetchWithProgress, canvasToFloat32Tensor } from './paddle_core.js?v=gold_3.8.4';
+import { isWebGPUSupported } from '../onnx/onnx_support.js?v=gold_3.8.4';
 
 const P_STATUS = {
     IDLE: 'idle',

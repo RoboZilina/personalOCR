@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personalocr-v3.8.1-gold';
+const CACHE_NAME = 'personalocr-v3.8.4-gold';
 
 const ASSETS = [
   '/',
@@ -36,7 +36,8 @@ const ASSETS = [
   '/models/paddle/japan_dict.txt',
   '/models/paddle/manifest.json',
   '/settings.js',
-  '/styles.css'
+  '/styles.css',
+  '/js/utils/fetch_utils.js'
 ];
 
 // 1. Installs Assets (Cache-First)

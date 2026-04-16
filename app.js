@@ -186,12 +186,14 @@ const engines = {
 const EngineManager = (() => {
 
     // Internal state placeholders
+    const engineCache = new Map(); // id -> engine instance
     let currentEngine = null;
     let currentEngineId = null;
     let currentLabel = null;
     let currentCapabilities = {};
     let currentInfo = {};
-    let engineState = 'idle'; // 'idle' | 'loading' | 'ready' | 'processing' | 'error'
+    let engineState = 'idle'; 
+    let switchingLock = false;
 
     // Status listeners (UI will subscribe later)
     const statusListeners = new Set();
@@ -204,7 +206,7 @@ const EngineManager = (() => {
         return () => statusListeners.delete(listener);
     }
 
-    // Subscribe to specific events (Convenience Wrappers)
+    // Subscribe to specific events
     function onReady(fn) { listeners.ready.push(fn); return () => { listeners.ready = listeners.ready.filter(f => f !== fn); }; }
     function onLoading(fn) { listeners.loading.push(fn); return () => { listeners.loading = listeners.loading.filter(f => f !== fn); }; }
     function onError(fn) { listeners.error.push(fn); return () => { listeners.error = listeners.error.filter(f => f !== fn); }; }
@@ -218,7 +220,6 @@ const EngineManager = (() => {
     // Notify all listeners
     function notifyStatus(state, text, progress = null) {
         engineState = state;
-
         if (state === STATUS.READY) emit('ready', text);
         if (state === STATUS.LOADING || state === STATUS.DOWNLOADING) emit('loading', text);
         if (state === STATUS.ERROR) emit('error', text);
@@ -228,67 +229,139 @@ const EngineManager = (() => {
         }
     }
 
-    // Lifecycle: switching engines
-    async function switchEngine(registryEntry) {
-        await disposeEngine();
-        return await loadEngine(registryEntry);
+    /**
+     * Internal factory + loader with caching.
+     * @param {string} id - Engine ID from registry
+     * @param {boolean} isSilent - If true, status updates are not broadcast to UI
+     */
+    async function getOrLoadEngine(id, isSilent = false) {
+        // 1. Cache Hit
+        if (engineCache.has(id)) {
+            return engineCache.get(id);
+        }
+
+        const registryEntry = engines[id];
+        if (!registryEntry) {
+            throw new Error(`[ENGINE] No registry entry for: ${id}`);
+        }
+
+        // 2. Factory creation
+        const reporter = (state, text, progress) => {
+            // Only report to UI if we aren't preloading silently OR if this IS the active engine
+            if (!isSilent || id === currentEngineId) {
+                notifyStatus(state, text, progress);
+            }
+        };
+
+        const engine = registryEntry.factory({ reportStatus: reporter });
+        
+        // 3. Load logic
+        if (engine && typeof engine.load === 'function') {
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Initializing ${id.toUpperCase()}...`);
+            await engine.load();
+        }
+
+        // 4. Warm-up (Deterministic JIT/Shader compilation)
+        await _warmUpEngine(engine, id);
+
+        // 5. Commit to cache
+        engineCache.set(id, engine);
+        return engine;
     }
 
-    async function loadEngine(registryEntry) {
-        currentEngineId = registryEntry.id || 'unknown';
-        currentLabel = registryEntry.id || null;
-        currentCapabilities = {
-            supportsModes: registryEntry.supportsModes || false,
-            supportsMultiPass: registryEntry.supportsMultiPass || false,
-            supportsLastResort: registryEntry.supportsLastResort || false
-        };
-        currentInfo = {
-            id: currentEngineId,
-            label: currentLabel,
-            capabilities: {
-                ...currentCapabilities,
-                isMultiLine: registryEntry.isMultiLine || false
+    async function _warmUpEngine(engine, id) {
+        if (engine._warmedUp) return;
+        try {
+            if (engine && typeof engine.warmUp === 'function') {
+                if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Warming up ${id.toUpperCase()}...`);
+                await engine.warmUp();
             }
-        };
-        notifyStatus('loading', `🟡 Initializing ${currentLabel?.toUpperCase() || 'UNKNOWN'}...`);
+            engine._warmedUp = true;
+        } catch (err) {
+            console.warn(`[ENGINE] Warm-up failed for ${id}:`, err);
+        }
+    }
+
+    /**
+     * High-level switch with persistence and locking.
+     */
+    async function switchEngine(registryEntry) {
+        const id = registryEntry.id;
+
+        if (switchingLock) {
+            if (window.VNOCR_DEBUG) console.warn("[TRACE] Ignored overlapping engine switch");
+            return;
+        }
+        switchingLock = true;
 
         try {
-            const deps = { reportStatus: notifyStatus };
-            currentEngine = registryEntry.factory(deps);
+            // Priority: Update identity state so any load progress targets the correct ID
+            currentEngineId = id;
+            currentLabel = id;
+            
+            // Get from cache or perform full init
+            const engine = await getOrLoadEngine(id);
+            currentEngine = engine;
 
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.LOADING}`);
-            if (currentEngine && typeof currentEngine.load === 'function') {
-                await currentEngine.load();
-            }
+            // Update Metadata (Derived from registry)
+            currentCapabilities = {
+                supportsModes: registryEntry.supportsModes || false,
+                supportsMultiPass: registryEntry.supportsMultiPass || false,
+                isMultiLine: registryEntry.isMultiLine || false
+            };
+            currentInfo = {
+                id: currentEngineId,
+                label: currentLabel,
+                capabilities: currentCapabilities
+            };
 
             isReady = true;
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.READY}`);
-            notifyStatus('ready', `🟢 ${currentLabel?.toUpperCase() || 'OCR'} READY`);
+            notifyStatus('ready', getReadyStatus());
             return currentEngine;
         } catch (err) {
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] ${currentLabel?.toUpperCase()} → ${STATUS.ERROR}`);
             isReady = false;
             notifyStatus('error', '🔴 Load Failed');
             throw err;
+        } finally {
+            switchingLock = false;
         }
     }
 
-    async function disposeEngine() {
-        if (currentEngine && typeof currentEngine.dispose === 'function') {
-            try {
-                await currentEngine.dispose();
-            } catch (err) {
-                console.error('Engine dispose error:', err);
+    /**
+     * Silent initialization of core engines (Paddle/Tesseract).
+     */
+    async function preloadCoreEngines() {
+        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Preloading core engines (Paddle/Tesseract)...");
+        try {
+            // Parallel load for efficiency
+            await Promise.all([
+                getOrLoadEngine('paddle', true),
+                getOrLoadEngine('tesseract', true)
+            ]);
+            if (window.VNOCR_DEBUG) console.debug("[ENGINE] Core preloading complete.");
+        } catch (err) {
+            console.warn("[ENGINE] Foreground preload partially failed:", err);
+        }
+    }
+
+    async function disposeAllEngines() {
+        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Purging engine cache...");
+        for (const [id, engine] of engineCache.entries()) {
+            if (engine && typeof engine.dispose === 'function') {
+                try {
+                    await engine.dispose();
+                    if (window.VNOCR_DEBUG) console.debug(`[TRACE] Engine Disposed: ${id}`);
+                } catch (err) {
+                    console.error(`Engine dispose error (${id}):`, err);
+                }
             }
         }
-        currentInfo = { capabilities: {} };
+        engineCache.clear();
+        currentEngine = null;
+        currentEngineId = null;
         isReady = false;
-        logTrace(`Engine Disposed: ${currentEngineId}`);
-        notifyStatus('idle', 'Engine Disposed');
+        notifyStatus('idle', 'All engines cleared');
     }
-
-
-
 
     // Unified OCR entry point
     async function runOCR(canvas, options = {}) {
@@ -348,7 +421,8 @@ const EngineManager = (() => {
 
     return {
         onReady, onLoading, onError, onStatusChange,
-        switchEngine, runOCR, notifyStatus, _notifyStatus: notifyStatus,
+        switchEngine, preloadCoreEngines, disposeAllEngines,
+        runOCR, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
         getInfo: () => currentInfo,
         emitError: (err) => emit('error', err),
@@ -372,74 +446,59 @@ window.EngineManager = EngineManager;
  * @param {string} id - The engine ID from the registry.
  */
 async function switchEngineModular(id) {
-    if (switchingLock) {
-        if (window.VNOCR_DEBUG) console.warn("[TRACE] Ignored overlapping engine switch");
-        return;
-    }
-    switchingLock = true;
+    const normalizedId = id.replace(/_.+$/, "");
+    if (getSetting('debug')) console.debug("[ENGINE-DEBUG] switchEngineModular() requested:", id, "normalized:", normalizedId);
 
     try {
         logTrace(`Switching engine to: ${id}`);
-        const entry = engines[id] || engines['tesseract']; // Audit Fallback
-        const normalizedId = id.replace(/_.+$/, "");
-
-
-        if (getSetting('debug')) console.debug("[ENGINE-DEBUG] switchEngineModular() requested:", id, "normalized:", normalizedId);
-
+        
+        // 1) UI State Sync
         const mangaNote = document.getElementById('manga-note');
-        if (mangaNote) {
-            mangaNote.classList.toggle('visible', normalizedId === 'manga');
-        }
+        if (mangaNote) mangaNote.classList.toggle('visible', normalizedId === 'manga');
 
         const capturePreviewMenu = document.getElementById('menu-capture-preview');
-        if (capturePreviewMenu) {
-            capturePreviewMenu.style.display = normalizedId === 'manga' ? 'none' : 'block';
-        }
+        if (capturePreviewMenu) capturePreviewMenu.style.display = normalizedId === 'manga' ? 'none' : 'block';
 
-        // 2) Lock UI during transition
-        if (engineSelector) engineSelector.disabled = true;
-        if (modeSelector) modeSelector.disabled = true;
-
-        // 3) Toggle Manga Dashboard Layout
         const mainNode = document.querySelector('.app-main');
         if (mainNode) {
             if (normalizedId === 'manga') mainNode.classList.add('manga-layout');
             else mainNode.classList.remove('manga-layout');
         }
 
-        // 4) Delegate Lifecycle to EngineManager
+        // 2) Lock UI Selectors
+        if (engineSelector) engineSelector.disabled = true;
+        if (modeSelector) modeSelector.disabled = true;
+
+        // 3) Trigger Lifecycle (EngineManager handles caching and warm-up)
         const registryEntry = engines[normalizedId];
         if (!registryEntry) {
-            console.error("[ENGINE-ERROR] No engine factory for:", normalizedId);
-            if (engineSelector) engineSelector.disabled = false;
-            if (modeSelector) modeSelector.disabled = false;
-            setOCRStatus('error', '🔴 Factory Missing');
-            return;
+            throw new Error(`No engine factory for: ${normalizedId}`);
         }
 
-        // Gold v3.1 Hardening: Deterministic awaited engine switch
         await EngineManager.switchEngine({
             ...registryEntry,
             id: normalizedId
-        }).catch(err => {
-            console.error('Engine load error:', err);
         });
 
-        // 8) Restore UI state
+        // 4) Restore UI Selectors
         if (engineSelector) {
             let selectorValue = id;
             if (id === "paddle") {
                 const count = getSetting('paddleLineCount') || 3;
                 selectorValue = `paddle_${count}`;
             }
-            engineSelector.value = selectorValue; // preserve UI variant (e.g. "paddle_2")
+            engineSelector.value = selectorValue;
             engineSelector.disabled = false;
         }
         if (modeSelector) {
-            modeSelector.disabled = !registryEntry.supportsModes;
+            modeSelector.disabled = !EngineManager.getInfo().capabilities.supportsModes;
         }
-    } finally {
-        switchingLock = false;
+
+    } catch (err) {
+        console.error('[ENGINE-ERROR] Switch failed:', err);
+        setOCRStatus('error', '🔴 Factory Missing');
+        if (engineSelector) engineSelector.disabled = false;
+        if (modeSelector) modeSelector.disabled = false;
     }
 }
 
@@ -2051,8 +2110,12 @@ async function globalInitialize() {
         }
     }
 
-    // 2. Trigger actual engine load
+    // 2. Trigger actual engine load (Priority Pass)
     await switchEngineModular(savedEngine);
+
+    // 3. Background Optimization (Second Pass)
+    // Silently warm up the other core engine to enable instant hot-swapping
+    EngineManager.preloadCoreEngines();
 
     // 3. Post-load Mode Restoration (Deterministic)
     const engineInfo = EngineManager.getInfo();
@@ -2289,6 +2352,14 @@ function initEventListeners() {
     if (menuContact) menuContact.onclick = () => {
         window.open('https://github.com/RoboZilina/personalOCR/issues/new', '_blank', 'noopener,noreferrer');
         closeMenu();
+    };
+
+    if (menuPurge) menuPurge.onclick = async () => {
+        if (confirm("Unload all OCR engines from memory? This is recommended for mobile devices or if performance slows down.")) {
+            await EngineManager.disposeAllEngines();
+            closeMenu();
+            // Note: EngineManager.onStatusChange will handle the "Engines Unloaded" pill update
+        }
     };
 
     if (menuReset) menuReset.onclick = () => {

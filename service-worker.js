@@ -2,7 +2,7 @@ const CACHE_NAME = 'personalocr-v3.8.4-gold-patch1';
 
 const ASSETS = [
   '/',
-  '/app.v38.js',
+  '/app.js',
   '/index.html',
   '/icon-192.png',
   '/icon-512.png',
@@ -16,7 +16,7 @@ const ASSETS = [
   '/js/onnx/ort-wasm.wasm',
   '/js/onnx/ort.min.js',
   '/js/paddle/paddle_core.js',
-  '/js/paddle/paddle_engine.v38.js',
+  '/js/paddle/paddle_engine.js',
   '/js/tesseract/tesseract_engine.js',
   '/js/tesseract/worker.min.js',
   '/js/tesseract/tesseract.min.js',
@@ -77,28 +77,38 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strip query parameters for cache lookup (e.g., ?v=gold_3.8.4)
-  // but still fetch with original URL to get proper cache-busting
-  const cacheUrl = url.pathname;
+  // Use the full request URL as cache key (including query params like ?v=3.8.4)
+  const cacheKey = event.request.url;
 
-  // Simplified Strategy: Cache Match (by pathname) -> Network Fallback
+  // Cache-First Strategy: Return cached version immediately if available,
+  // otherwise fetch from network and cache the response
   event.respondWith(
-    caches.match(cacheUrl).then((cachedResponse) => {
-      // Return cached asset if found
-      if (cachedResponse) return cachedResponse;
+    caches.match(cacheKey).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
 
-      // Otherwise, fetch from network with original URL (including query params)
-      return fetch(event.request).then((networkResponse) => {
+      return fetch(event.request).then(async (networkResponse) => {
         // Cache successful same-origin responses for future offline use
         if (networkResponse && networkResponse.status === 200) {
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(cacheUrl, responseClone);
-          });
+          const cache = await caches.open(CACHE_NAME);
+          // Must clone before reading/returning the response
+          await cache.put(cacheKey, networkResponse.clone());
         }
         return networkResponse;
-      }).catch(() => {
-        // Silent fail for network errors (e.g., offline with no cache)
+      }).catch(async () => {
+        // Network failed: try to find any cached version (ignoring query params)
+        const pathnameMatch = await caches.match(event.request, { ignoreSearch: true });
+        if (pathnameMatch) {
+          return pathnameMatch;
+        }
+        // Return a minimal offline response for navigation requests
+        if (event.request.mode === 'navigate') {
+          return new Response('Offline - App not cached', { 
+            status: 503, 
+            headers: { 'Content-Type': 'text/plain' } 
+          });
+        }
         return null;
       });
     })

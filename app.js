@@ -67,14 +67,16 @@ import {
     resetSettings
 } from './settings.js';
 
+import { STATUS } from './js/core/status.js?v=3.8.4';
+
 import {
     runPaddleOCR
-} from './js/paddle/paddle_core.js?v=gold_3.8.4';
+} from './js/paddle/paddle_core.js?v=3.8.4';
 
-import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=gold_3.8.4';
-import { PaddleOCR } from './js/paddle/paddle_engine.v38.js?v=gold_3.8.4';
-import { MangaOCREngine } from './js/manga/manga_engine.js?v=gold_3.8.4';
-import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=gold_3.8.4';
+import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=3.8.4';
+import { PaddleOCR } from './js/paddle/paddle_engine.js?v=3.8.4';
+import { MangaOCREngine } from './js/manga/manga_engine.js?v=3.8.4';
+import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=3.8.4';
 
 const splashHints = [
     "PaddleOCR: Highest accuracy, but longest warm-up time.",
@@ -111,19 +113,8 @@ function startSplashHintRotation() {
 /** Unified Readiness API (Hardening Phase) */
 
 /**
- * 1. STATUS REGISTRY (Gold v3.7 Logic Stabilization)
- * Centralizes all engine states to prevent string drift.
- */
-const STATUS = {
-    IDLE: 'idle',
-    PRE_LOADING: 'pre-loading',
-    DOWNLOADING: 'downloading',
-    LOADING: 'loading',
-    WARMING: 'warming-up',
-    READY: 'ready',
-    PROCESSING: 'processing',
-    ERROR: 'error'
-};
+ * STATUS is now imported from js/core/status.js
+ * All engines use the same canonical status constants.
 
 
 
@@ -436,6 +427,7 @@ const EngineManager = (() => {
         }
         currentEngine = null;
         currentEngineId = null;
+        currentInfo = { id: null, capabilities: {} };
         isReady = false;
         notifyStatus('idle', 'All engines cleared');
     }
@@ -513,7 +505,7 @@ const EngineManager = (() => {
         runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
         getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
-        getInfo: () => currentInfo,
+        getInfo: () => currentInfo || { id: null, capabilities: {} },
         getEngineInstance: () => currentEngine,
         getReadyStatus,
         emitError: (err) => emit('error', err),
@@ -838,13 +830,28 @@ async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
     console.log('[TRACE] preprocessForEngine called with engineId =', engineId);
     const pinnedEngine = EngineManager.getEngineInstance();
     
-    // Safety Fallback: Use Registry Preprocessor if instance is missing (e.g. during switch cycles)
-    if (!pinnedEngine || typeof pinnedEngine.preprocess !== 'function') {
-        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Instance missing preprocess, using manager fallback");
-        return await EngineManager.preprocess(rawCanvas, mode, lineCount);
+    // Try instance preprocess first
+    if (pinnedEngine && typeof pinnedEngine.preprocess === 'function') {
+        try {
+            return await pinnedEngine.preprocess(rawCanvas, mode, lineCount);
+        } catch (err) {
+            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Instance preprocess failed, trying registry fallback:", err);
+        }
     }
-
-    return await pinnedEngine.preprocess(rawCanvas, mode, lineCount);
+    
+    // Fallback 1: Try registry entry preprocess
+    const entry = engines[engineId];
+    if (entry && typeof entry.preprocess === 'function') {
+        try {
+            return await entry.preprocess(rawCanvas, mode, lineCount);
+        } catch (err) {
+            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Registry preprocess failed, using raw canvas fallback:", err);
+        }
+    }
+    
+    // Final Fallback: Return raw canvas wrapped in array to keep pipeline alive
+    if (window.VNOCR_DEBUG) console.debug("[ENGINE] No preprocess available, returning raw canvas");
+    return [rawCanvas];
 }
 
 
@@ -1289,8 +1296,9 @@ async function captureFrame(rect = null) {
     
     // Engine Pinning: Lock current instance and ID to ensure consistency throughout the slice cycle
     const pinnedEngine = EngineManager.getEngineInstance();
-    const pinnedInfo = EngineManager.getInfo();
-    const pinnedId = pinnedInfo.id;
+    const pinnedInfo = EngineManager.getInfo() || { id: null, capabilities: {} };
+    const pinnedCaps = pinnedInfo.capabilities || {};
+    const pinnedId = pinnedInfo.id || null;
     
     logTrace(`Capture started. Gen: ${myGen} | Engine: ${pinnedId}`);
 
@@ -1387,7 +1395,7 @@ async function captureFrame(rect = null) {
 
             // Debug Thumbnail
             if (i === 0) {
-                if (pinnedInfo.capabilities.isMultiLine) updateDebugThumb(rawCropCanvas);
+                if (pinnedCaps.isMultiLine) updateDebugThumb(rawCropCanvas);
                 else updateDebugThumb(canvases[0]);
             }
 

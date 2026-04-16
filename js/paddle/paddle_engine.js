@@ -1,19 +1,9 @@
-import { fetchWithProgress, canvasToFloat32Tensor } from './paddle_core.js?v=gold_3.8.4';
-import { isWebGPUSupported } from '../onnx/onnx_support.js?v=gold_3.8.4';
-
-const P_STATUS = {
-    IDLE: 'idle',
-    PRE_LOADING: 'pre-loading',
-    DOWNLOADING: 'downloading',
-    LOADING: 'loading',
-    WARMING: 'warming-up',
-    READY: 'ready',
-    PROCESSING: 'processing',
-    ERROR: 'error'
-};
+import { fetchWithProgress, canvasToFloat32Tensor } from './paddle_core.js?v=3.8.4';
+import { isWebGPUSupported } from '../onnx/onnx_support.js?v=3.8.4';
+import { STATUS } from '../core/status.js?v=3.8.4';
 
 export class PaddleOCR {
-    static STATUS = P_STATUS;
+    static STATUS = STATUS;
     constructor(manifestUrl, wasmBasePath, updateStatus) {
         this.id = 'paddle';
         this.label = 'PaddleOCR';
@@ -83,7 +73,7 @@ export class PaddleOCR {
         this.checkAssets();
 
         try {
-            this.reportStatus(P_STATUS.LOADING, '🟡 PaddleOCR: loading manifest…');
+            this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: loading manifest…');
             const res = await fetch(this.manifestUrl);
             this.manifest = await res.json();
 
@@ -106,33 +96,33 @@ export class PaddleOCR {
             const executionProviders = useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
 
             // Load detection model (Hybrid: Remote Priority)
-            this.reportStatus(P_STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1);
+            this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1);
             const detPath = this.manifest.det.remote_url || (modelBase + this.manifest.det.path);
             let detBuffer = await fetchWithProgress(
                 detPath,
-                (p) => this.reportStatus(P_STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1 + (p * 0.4))
+                (p) => this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1 + (p * 0.4))
             );
-            this.reportStatus(P_STATUS.LOADING, '🟡 PaddleOCR: initializing detection…', 0.5);
+            this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: initializing detection…', 0.5);
             this.detSession = await ort.InferenceSession.create(detBuffer, { executionProviders });
             console.log(`[ENGINE] PaddleOCR Detection Session — Active Backend: ${this.detSession.executionProvider || 'unknown'}`);
             detBuffer = null; // Memory Guard: Release buffer immediately after session creation
             await new Promise(resolve => setTimeout(resolve, 50)); // Memory Guard: Yield to allow GC breathing room
 
             // Load recognition model
-            this.reportStatus(P_STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading recognition model…', 0.6);
+            this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading recognition model…', 0.6);
             const recPath = this.manifest.rec.remote_url || (modelBase + this.manifest.rec.path);
             let recBuffer = await fetchWithProgress(
                 recPath,
-                (p) => this.reportStatus(P_STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading recognition model…', 0.6 + (p * 0.3))
+                (p) => this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading recognition model…', 0.6 + (p * 0.3))
             );
-            this.reportStatus(P_STATUS.LOADING, '🟡 PaddleOCR: initializing recognition…', 0.9);
+            this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: initializing recognition…', 0.9);
             this.recSession = await ort.InferenceSession.create(recBuffer, { executionProviders });
             console.log(`[ENGINE] PaddleOCR Recognition Session — Active Backend: ${this.recSession.executionProvider || 'unknown'}`);
             recBuffer = null; // Memory Guard: Release buffer
 
             // Load dictionary
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${P_STATUS.LOADING} (Dictionary)`);
-            this.reportStatus(P_STATUS.LOADING, '🟡 PaddleOCR: loading dictionary…', 0.95);
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.LOADING} (Dictionary)`);
+            this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: loading dictionary…', 0.95);
             const dictPath = this.manifest.dict.remote_url || (modelBase + this.manifest.dict.path);
             const dictRes = await fetch(dictPath);
             if (!dictRes.ok) throw new Error(`PaddleOCR: Dictionary load failed with status ${dictRes.status}`);
@@ -144,17 +134,17 @@ export class PaddleOCR {
             }
 
             // Warm-up WebGPU Shaders (if active)
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${P_STATUS.WARMING}`);
-            this.reportStatus(P_STATUS.WARMING, '🟡 PaddleOCR: warming up…', 0.98);
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.WARMING}`);
+            this.reportStatus(STATUS.WARMING, '🟡 PaddleOCR: warming up…', 0.98);
             await this.warmUp();
 
             this.isLoaded = true;
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${P_STATUS.READY}`);
-            this.reportStatus(P_STATUS.READY, '🟢 PaddleOCR: ready.');
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.READY}`);
+            this.reportStatus(STATUS.READY, '🟢 PaddleOCR: ready.');
         } catch (err) {
             console.error("PaddleOCR: Load Error:", err);
             try {
-                this.reportStatus(P_STATUS.ERROR, `🔴 PaddleOCR: ${err.message || 'Load Failed'}`);
+                this.reportStatus(STATUS.ERROR, `🔴 PaddleOCR: ${err.message || 'Load Failed'}`);
             } catch (enumErr) {
                 console.warn("PaddleOCR: Status report failed (enum/context error):", enumErr);
             }

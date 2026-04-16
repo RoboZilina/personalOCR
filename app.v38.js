@@ -137,7 +137,6 @@ let selectWindowBtn, vnVideo, selectionOverlay, historyContent, ttsVoiceSelect, 
 let captureLocked = false;
 let engineReady = false;
 let isProcessing = false; // Unified state tracking for OCR cycles
-let switchingLock = false; // Prevent overlapping engine switches (Gold v3.8)
 
 // 0. Emergency Safety Boundary: Register immediately at module load (Refined v3.8)
 startSplashHintRotation();
@@ -319,8 +318,8 @@ const EngineManager = (() => {
                     // Update internal state tracking
                     if (state === STATUS.READY) meta.state = 'ready';
                     
-                    // Broadcast to UI if active or forced
-                    if (!isSilent || id === currentEngineId) {
+                    // Broadcast to UI if active or forced, or if state is ERROR, or if debug flag is set
+                    if (!isSilent || id === currentEngineId || state === STATUS.ERROR || window.VNOCR_DEBUG) {
                         notifyStatus(state, text, progress, id);
                     }
                 };
@@ -1275,8 +1274,18 @@ async function captureFrame(rect = null) {
     // Hardening v3.8: Combined readiness and processing lock
     if (isProcessing || !EngineManager.isReady()) return;
     
-    isProcessing = true;
     const myGen = ++captureGeneration;
+    let lockReleased = false;
+    
+    // Helper to release lock safely
+    const releaseLock = () => {
+        if (!lockReleased) {
+            isProcessing = false;
+            lockReleased = true;
+        }
+    };
+    
+    isProcessing = true;
     
     // Engine Pinning: Lock current instance and ID to ensure consistency throughout the slice cycle
     const pinnedEngine = EngineManager.getEngineInstance();
@@ -1438,8 +1447,11 @@ async function captureFrame(rect = null) {
 
         // Small cooldown to prevent rapid-fire re-triggering
         setTimeout(() => {
+            // Always release the lock for this generation
+            releaseLock();
+            
+            // Only update UI if this generation is still current
             if (captureGeneration === myGen) {
-                isProcessing = false;
                 if (EngineManager.isReady()) {
                     setOCRStatus('ready', EngineManager.getReadyStatus());
                 }
@@ -2341,6 +2353,8 @@ async function globalInitialize() {
 
     // 6. Final Sync & Listeners
     initEventListeners();
+    initEventListeners_Part1();
+    initEventListeners_Part2();
 
     // Service Worker Registry
     if ('serviceWorker' in navigator) {

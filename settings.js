@@ -44,6 +44,13 @@ export function loadSettings() {
             const parsed = JSON.parse(stored);
             // Merge defaults with parsed to handle missing keys in old versions
             currentSettings = { ...defaultSettings, ...parsed };
+            
+            // Migration: legacy 'upscale' -> 'upscaleFactor'
+            if ('upscale' in parsed && !('upscaleFactor' in parsed)) {
+                currentSettings.upscaleFactor = parsed.upscale;
+                delete currentSettings.upscale;
+                console.log("[SETTINGS] Migrated legacy 'upscale' to 'upscaleFactor'");
+            }
         } else {
             currentSettings = { ...defaultSettings };
         }

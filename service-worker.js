@@ -3,10 +3,9 @@ const CACHE_NAME = 'personalocr-v3.8.4-gold-patch1';
 const ASSETS = [
   '/',
   '/app.v38.js',
-  '/app.v38.js?v=gold_3.8.4',
+  '/index.html',
   '/icon-192.png',
   '/icon-512.png',
-  '/index.html',
   '/js/manga/manga_engine.js',
   '/js/onnx/onnx_support.js',
   '/js/onnx/ort-wasm-simd-threaded.jsep.mjs',
@@ -29,6 +28,7 @@ const ASSETS = [
   '/js/tesseract/core/tesseract-core-simd.wasm.js',
   '/js/tesseract/core/tesseract-core-simd-lstm.wasm',
   '/js/tesseract/core/tesseract-core-simd-lstm.wasm.js',
+  '/js/utils/fetch_utils.js',
   '/manifest.json',
   '/models/manga/config.json',
   '/models/manga/manifest.json',
@@ -37,8 +37,7 @@ const ASSETS = [
   '/models/paddle/japan_dict.txt',
   '/models/paddle/manifest.json',
   '/settings.js',
-  '/styles.css',
-  '/js/utils/fetch_utils.js'
+  '/styles.css'
 ];
 
 // 1. Installs Assets (Cache-First)
@@ -78,14 +77,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Simplified Strategy: Cache Match -> Network Fallback
+  // Strip query parameters for cache lookup (e.g., ?v=gold_3.8.4)
+  // but still fetch with original URL to get proper cache-busting
+  const cacheUrl = url.pathname;
+
+  // Simplified Strategy: Cache Match (by pathname) -> Network Fallback
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.match(cacheUrl).then((cachedResponse) => {
       // Return cached asset if found
       if (cachedResponse) return cachedResponse;
 
-      // Otherwise, fetch from network
-      return fetch(event.request).catch(() => {
+      // Otherwise, fetch from network with original URL (including query params)
+      return fetch(event.request).then((networkResponse) => {
+        // Cache successful same-origin responses for future offline use
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(cacheUrl, responseClone);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
         // Silent fail for network errors (e.g., offline with no cache)
         return null;
       });

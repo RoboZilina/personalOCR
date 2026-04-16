@@ -3,6 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 8080;
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+// Security: Disable COEP/COOP by default for local dev; enable with ENABLE_COEP=1 for testing
+const ENABLE_COEP = process.env.ENABLE_COEP === '1';
 const MIME_TYPES = {
     '.html': 'text/html',
     '.js': 'text/javascript',
@@ -22,9 +26,23 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-    let filePath = '.' + req.url;
-    if (filePath === './') {
-        filePath = './index.html';
+    // Security: Normalize and sanitize path to prevent directory traversal
+    let requestedPath = req.url;
+    if (requestedPath === '/') {
+        requestedPath = '/index.html';
+    }
+    
+    // Remove any query parameters for file lookup
+    const cleanPath = requestedPath.split('?')[0];
+    
+    // Normalize the path and ensure it's within project root
+    const filePath = path.normalize(path.join(PROJECT_ROOT, cleanPath));
+    
+    // Security check: ensure file is within project root
+    if (!filePath.startsWith(PROJECT_ROOT)) {
+        res.writeHead(403);
+        res.end('403 Forbidden');
+        return;
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
@@ -40,11 +58,17 @@ const server = http.createServer((req, res) => {
                 res.end('500 Error: ' + error.code);
             }
         } else {
-            res.writeHead(200, {
-                'Content-Type': contentType,
-                'Cross-Origin-Embedder-Policy': 'require-corp',
-                'Cross-Origin-Opener-Policy': 'same-origin'
-            });
+            const headers = {
+                'Content-Type': contentType
+            };
+            
+            // Only add COEP/COOP headers if explicitly enabled
+            if (ENABLE_COEP) {
+                headers['Cross-Origin-Embedder-Policy'] = 'require-corp';
+                headers['Cross-Origin-Opener-Policy'] = 'same-origin';
+            }
+            
+            res.writeHead(200, headers);
             res.end(content, 'utf-8');
         }
     });

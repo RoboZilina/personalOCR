@@ -58,7 +58,6 @@
                         <option value="grayscale">Grayscale</option>
                         <option value="raw">Raw</option>
                     </select>
-                    <button id="panic-btn" class="panic-btn" title="Panic Mode: Max Enhance!">🚨</button>
                     <select id="model-selector" class="ui-select">
                         <option value="tesseract">Tesseract (Lightweight)</option>
                         <optgroup label="PaddleOCR (Multi-Line)">
@@ -469,19 +468,7 @@
     <!-- Scripts at the end of body -->
     <script src="./js/onnx/ort.min.js"></script>
     <script src="./js/tesseract/tesseract.min.js"></script>
-    <script type="module" src="app.v38.js"></script>
-    <script>
-        // Emergency Safety Boundary: Force splash dismissal after 20s even if scripts fail
-        setTimeout(() => {
-            const splash = document.getElementById('startup-splash');
-            if (splash && splash.style.display !== 'none') {
-                console.warn("[FAIL-SAFE] Emergency splash dismissal triggered from index.html.");
-                splash.style.transition = 'opacity 0.5s ease';
-                splash.style.opacity = '0';
-                setTimeout(() => splash.remove(), 500);
-            }
-        }, 20000);
-    </script>
+    <script type="module" src="app.v38.js?v=gold_3.8.1"></script>
 </body>
 
 </html>

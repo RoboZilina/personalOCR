@@ -74,6 +74,7 @@ import {
 import { TesseractEngine } from './js/tesseract/tesseract_engine.js';
 import { PaddleOCR } from './js/paddle/paddle_engine.v38.js';
 import { MangaOCREngine } from './js/manga/manga_engine.js';
+import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js';
 
 /** Unified Readiness API (Hardening Phase) */
 
@@ -106,11 +107,12 @@ let engineReady = false;
 let isProcessing = false; // Unified state tracking for OCR cycles
 let switchingLock = false; // Prevent overlapping engine switches (Gold v3.8)
 
-// 0. Emergency Safety Boundary: Register immediately at module load
+// 0. Emergency Safety Boundary: Register immediately at module load (Refined v3.8)
 setTimeout(() => {
     const splash = document.getElementById('startup-splash');
-    if (splash && splash.style.display !== 'none') {
-        console.warn("[INIT-FAILSAFE] Safety timeout triggered from app.js module scope.");
+    // Pure JS Truth Flag: Only trigger if the splash hasn't been dismissed by the main logic
+    if (splash && !splash.dataset.dismissed) {
+        console.warn("[INIT-FAILSAFE] 30s Safety timeout triggered. Standard initialization exceeded expected window.");
         if (typeof dismissSplashScreen === 'function') dismissSplashScreen();
         else {
             splash.style.transition = 'opacity 0.5s ease';
@@ -118,7 +120,7 @@ setTimeout(() => {
             setTimeout(() => splash.remove(), 500);
         }
     }
-}, 15000);
+}, 30000);
 
 function updateCaptureButtonState() {
     if (!refreshOcrBtn) return;
@@ -334,6 +336,9 @@ const EngineManager = (() => {
             return currentEngine;
         } catch (err) {
             isReady = false;
+            // Recover identity on failure to prevent UI "stuck" state
+            currentEngineId = 'tesseract'; 
+            currentLabel = 'tesseract';
             notifyStatus('error', '🔴 Load Failed');
             throw err;
         } finally {
@@ -517,7 +522,9 @@ async function switchEngineModular(id) {
             engineSelector.disabled = false;
         }
         if (modeSelector) {
-            modeSelector.disabled = !EngineManager.getInfo().capabilities.supportsModes;
+            const engineInfo = EngineManager.getInfo() || {};
+            const caps = engineInfo.capabilities || {};
+            modeSelector.disabled = !caps.supportsModes;
         }
 
     } catch (err) {
@@ -2085,7 +2092,10 @@ function initEventListeners_Part2() {
  */
 function dismissSplashScreen() {
     const splash = document.getElementById('startup-splash');
-    if (!splash) return;
+    if (!splash || splash.dataset.dismissed) return;
+
+    // Set persistence flag immediately to prevent double-dismiss or fail-safe triggers
+    splash.dataset.dismissed = "1";
 
     // Smooth transition
     splash.classList.add('fade-out');
@@ -2097,6 +2107,42 @@ function dismissSplashScreen() {
     setTimeout(() => {
         splash.remove();
     }, 500);
+}
+
+/**
+ * Observational Performance Dashboard (Gold v3.8 Restoration)
+ * Updates UI markers for Hardware Acceleration/Isolation without triggering reloads.
+ */
+async function updatePerformanceStatus() {
+    if (!perfIcon || !perfInfo) return;
+    
+    try {
+        const isIsolated = window.crossOriginIsolated;
+        const hasWebGPU = await vnIsWebGPUSupported();
+        
+        let icon = '⚪';
+        let label = 'Standard Mode (Single-Threaded)';
+        let details = `Isolation: ${isIsolated ? 'Active' : 'Disabled'} | WebGPU: ${hasWebGPU ? 'Supported' : 'Not Detected'}`;
+
+        if (isIsolated) {
+            icon = '🟡';
+            label = 'Isolated Mode (High-Performance Threads)';
+            if (hasWebGPU) {
+                icon = '🟢';
+                label = 'Neural Acceleration Active (WebGPU)';
+            }
+        }
+
+        perfIcon.textContent = icon;
+        perfIcon.title = label;
+        perfInfo.textContent = details;
+
+        if (window.VNOCR_DEBUG) {
+            console.debug(`[PERF-SYNC] Icon: ${icon} | ${label}`);
+        }
+    } catch (err) {
+        console.warn("[PERF-SYNC-ERROR] Failed to update diagnostics:", err);
+    }
 }
 
 async function globalInitialize() {
@@ -2141,7 +2187,7 @@ async function globalInitialize() {
     }
 
     // 4. Engine Stabilization
-    const savedEngine = getSetting('engine') || 'tesseract';
+    const savedEngine = getSetting('ocrEngine') || 'tesseract';
 
     try {
         // Pass 1: Primary load
@@ -2152,15 +2198,18 @@ async function globalInitialize() {
             await EngineManager.preloadCoreEngines();
         }
 
-        // Pass 3: State Sync
-        const engineInfo = EngineManager.getInfo();
+        // Pass 3: State Sync (Hardened Null-Guards)
+        const engineInfo = EngineManager.getInfo() || {};
+        const caps = engineInfo.capabilities || {};
+        const supportsModes = !!caps.supportsModes;
+
         let savedMode = getSetting('ocrMode');
         const defaultMode = engines[savedEngine]?.defaultMode || 'default_mini';
         if (!savedMode) savedMode = defaultMode;
 
         if (modeSelector) {
             modeSelector.value = savedMode;
-            modeSelector.disabled = !engineInfo.capabilities.supportsModes;
+            modeSelector.disabled = !supportsModes;
         }
 
         if (engineSelector) {
@@ -2242,34 +2291,12 @@ async function globalInitialize() {
         } else {
             navigator.serviceWorker.register('service-worker.js').then(reg => {
                 if (!window.crossOriginIsolated && reg.active) {
-                    console.log("[SW] Isolation headers ready. Refresh required for high-performance mode.");
+                    console.log("[SW] Standard mode active. Hardware acceleration will enable on next natural visit via _headers.");
                 }
             }).catch(e => console.warn('SW registration failed:', e));
-
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                const reloadCount = parseInt(sessionStorage.getItem('vn-ocr-sw-reload') || '0');
-                if (reloadCount > 1) return;
-
-                const banner = document.createElement('div');
-                banner.className = 'startup-banner active';
-                banner.style.zIndex = '99999';
-                banner.innerHTML = `
-                    <div class="banner-text">🚀 <strong>Performance Engine Ready:</strong> Refresh to enable Hardware Acceleration (WebGPU/Threads).</div>
-                    <div class="banner-actions">
-                        <button class="btn" id="enable-hw-btn">Enable Now</button>
-                    </div>`;
-                document.body.prepend(banner);
-
-                const enableBtn = document.getElementById('enable-hw-btn');
-                if (enableBtn) {
-                     enableBtn.onclick = () => {
-                        sessionStorage.setItem('vn-ocr-sw-reload', (reloadCount + 1).toString());
-                        location.reload();
-                    };
-                }
-            });
         }
     }
+    */
 }
 
 /** 6.6 UI Interaction Registry (Hydration Safety) */

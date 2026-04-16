@@ -1,8 +1,8 @@
-const CACHE_NAME = 'personalocr-v3.8.0-gold';
+const CACHE_NAME = 'personalocr-v3.8.1-gold';
 
 const ASSETS = [
   '/',
-  '/app.js',
+  '/app.v38.js',
   '/icon-192.png',
   '/icon-512.png',
   '/index.html',
@@ -16,7 +16,7 @@ const ASSETS = [
   '/js/onnx/ort-wasm.wasm',
   '/js/onnx/ort.min.js',
   '/js/paddle/paddle_core.js',
-  '/js/paddle/paddle_engine.js',
+  '/js/paddle/paddle_engine.v38.js',
   '/js/tesseract/tesseract_engine.js',
   '/js/tesseract/worker.min.js',
   '/js/tesseract/tesseract.min.js',

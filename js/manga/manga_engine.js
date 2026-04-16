@@ -1,3 +1,6 @@
+import { isWebGPUSupported } from '../onnx/onnx_support.js';
+import { fetchWithProgress } from '../paddle/paddle_core.js';
+
 const M_STATUS = {
     IDLE: 'idle',
     PRE_LOADING: 'pre-loading',

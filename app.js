@@ -102,8 +102,9 @@ let selectWindowBtn, vnVideo, selectionOverlay, historyContent, ttsVoiceSelect, 
 
 // === Throttling & Readiness State (Patch v3.1 Gold) ===
 let captureLocked = false;
-let engineReady = false; 
+let engineReady = false;
 let isProcessing = false; // Unified state tracking for OCR cycles
+let switchingLock = false; // Prevent overlapping engine switches (Gold v3.8)
 
 function updateCaptureButtonState() {
     if (!refreshOcrBtn) return;
@@ -371,64 +372,74 @@ window.EngineManager = EngineManager;
  * @param {string} id - The engine ID from the registry.
  */
 async function switchEngineModular(id) {
-    logTrace(`Switching engine to: ${id}`);
-    const entry = engines[id] || engines['tesseract']; // Audit Fallback
-    const normalizedId = id.replace(/_.+$/, "");
-
-
-    if (getSetting('debug')) console.debug("[ENGINE-DEBUG] switchEngineModular() requested:", id, "normalized:", normalizedId);
-
-    const mangaNote = document.getElementById('manga-note');
-    if (mangaNote) {
-        mangaNote.classList.toggle('visible', normalizedId === 'manga');
-    }
-
-    const capturePreviewMenu = document.getElementById('menu-capture-preview');
-    if (capturePreviewMenu) {
-        capturePreviewMenu.style.display = normalizedId === 'manga' ? 'none' : 'block';
-    }
-
-    // 2) Lock UI during transition
-    if (engineSelector) engineSelector.disabled = true;
-    if (modeSelector) modeSelector.disabled = true;
-
-    // 3) Toggle Manga Dashboard Layout
-    const mainNode = document.querySelector('.app-main');
-    if (mainNode) {
-        if (normalizedId === 'manga') mainNode.classList.add('manga-layout');
-        else mainNode.classList.remove('manga-layout');
-    }
-
-    // 4) Delegate Lifecycle to EngineManager
-    const registryEntry = engines[normalizedId];
-    if (!registryEntry) {
-        console.error("[ENGINE-ERROR] No engine factory for:", normalizedId);
-        if (engineSelector) engineSelector.disabled = false;
-        if (modeSelector) modeSelector.disabled = false;
-        setOCRStatus('error', '🔴 Factory Missing');
+    if (switchingLock) {
+        if (window.VNOCR_DEBUG) console.warn("[TRACE] Ignored overlapping engine switch");
         return;
     }
+    switchingLock = true;
 
-    // Gold v3.1 Hardening: Deterministic awaited engine switch
-    await EngineManager.switchEngine({
-        ...registryEntry,
-        id: normalizedId
-    }).catch(err => {
-        console.error('Engine load error:', err);
-    });
+    try {
+        logTrace(`Switching engine to: ${id}`);
+        const entry = engines[id] || engines['tesseract']; // Audit Fallback
+        const normalizedId = id.replace(/_.+$/, "");
 
-    // 8) Restore UI state
-    if (engineSelector) {
-        let selectorValue = id;
-        if (id === "paddle") {
-            const count = getSetting('paddleLineCount') || 3;
-            selectorValue = `paddle_${count}`;
+
+        if (getSetting('debug')) console.debug("[ENGINE-DEBUG] switchEngineModular() requested:", id, "normalized:", normalizedId);
+
+        const mangaNote = document.getElementById('manga-note');
+        if (mangaNote) {
+            mangaNote.classList.toggle('visible', normalizedId === 'manga');
         }
-        engineSelector.value = selectorValue; // preserve UI variant (e.g. "paddle_2")
-        engineSelector.disabled = false;
-    }
-    if (modeSelector) {
-        modeSelector.disabled = !registryEntry.supportsModes;
+
+        const capturePreviewMenu = document.getElementById('menu-capture-preview');
+        if (capturePreviewMenu) {
+            capturePreviewMenu.style.display = normalizedId === 'manga' ? 'none' : 'block';
+        }
+
+        // 2) Lock UI during transition
+        if (engineSelector) engineSelector.disabled = true;
+        if (modeSelector) modeSelector.disabled = true;
+
+        // 3) Toggle Manga Dashboard Layout
+        const mainNode = document.querySelector('.app-main');
+        if (mainNode) {
+            if (normalizedId === 'manga') mainNode.classList.add('manga-layout');
+            else mainNode.classList.remove('manga-layout');
+        }
+
+        // 4) Delegate Lifecycle to EngineManager
+        const registryEntry = engines[normalizedId];
+        if (!registryEntry) {
+            console.error("[ENGINE-ERROR] No engine factory for:", normalizedId);
+            if (engineSelector) engineSelector.disabled = false;
+            if (modeSelector) modeSelector.disabled = false;
+            setOCRStatus('error', '🔴 Factory Missing');
+            return;
+        }
+
+        // Gold v3.1 Hardening: Deterministic awaited engine switch
+        await EngineManager.switchEngine({
+            ...registryEntry,
+            id: normalizedId
+        }).catch(err => {
+            console.error('Engine load error:', err);
+        });
+
+        // 8) Restore UI state
+        if (engineSelector) {
+            let selectorValue = id;
+            if (id === "paddle") {
+                const count = getSetting('paddleLineCount') || 3;
+                selectorValue = `paddle_${count}`;
+            }
+            engineSelector.value = selectorValue; // preserve UI variant (e.g. "paddle_2")
+            engineSelector.disabled = false;
+        }
+        if (modeSelector) {
+            modeSelector.disabled = !registryEntry.supportsModes;
+        }
+    } finally {
+        switchingLock = false;
     }
 }
 
@@ -513,7 +524,7 @@ function setOCRStatus(state, text, progress = null) {
         const pct = Math.round(progress * 100);
         ocrStatus.style.setProperty('--progress', `${pct}%`);
         ocrStatus.setAttribute('data-progress', 'true');
-        
+
         // Dynamic Text Override
         if (text && !text.includes('%') && !text.includes('/')) {
             text = `${text} (${pct}%)`;
@@ -678,7 +689,7 @@ if (historyContent) {
         const action = btn.getAttribute('data-action');
         if (action === 'speak') speak(textSpan.textContent);
         if (action === 'copy') {
-            navigator.clipboard.writeText(textSpan.textContent).catch(() => {});
+            navigator.clipboard.writeText(textSpan.textContent).catch(() => { });
             btn.innerHTML = '✅';
             setTimeout(() => btn.innerHTML = '📋', 1000);
         }
@@ -821,12 +832,12 @@ function setupSelectionOverlay() {
         const hint = document.getElementById('selection-hint');
         if (isValidCrop) {
             selectionRect = finalRect;
-            
+
             // Throttled First Capture (Patch v2.5)
             if (!captureLocked && engineReady) {
                 captureLocked = true;
                 updateCaptureButtonState();
-                
+
                 captureFrame(selectionRect).finally(() => {
                     setTimeout(() => {
                         captureLocked = false;
@@ -1050,8 +1061,8 @@ function boostContrast(canvas, factor = 1.08) {
 
 async function captureFrame(rect = null) {
     // Hardening v3.4: Null-selection guard (Fixes denormalizeSelection TypeError)
-    if (!rect && !window.selectionRect) return; 
-    
+    if (!rect && !window.selectionRect) return;
+
     if (isProcessing) return; // Prevent overlapping cycles (Gold v3.1)
     isProcessing = true;
     const myGen = ++captureGeneration;
@@ -1098,7 +1109,7 @@ async function captureFrame(rect = null) {
             // 2. Otherwise: Continue with the remaining 4 passes for Analyst voting
             results.push({ text: first.text, confidence: first.confidence });
             for (let i = 1; i < canvases.length; i++) {
-                setOCRStatus('processing', `Analyst: Pass ${i+1}/5...`);
+                setOCRStatus('processing', `Analyst: Pass ${i + 1}/5...`);
                 const r = await EngineManager.runOCR(canvases[i], 'tesseract');
                 results.push({ text: r.text, confidence: r.confidence });
             }
@@ -1152,8 +1163,8 @@ async function captureFrame(rect = null) {
             try {
                 // Report slice progress (Gold v3.7)
                 if (window.VNOCR_DEBUG) console.debug(`[GEN ${myGen}] Processing slice ${i + 1}/${canvases.length}`);
-                setOCRStatus(STATUS.PROCESSING, `Processing (${i + 1}/${canvases.length})`, (i+1)/canvases.length);
-                
+                setOCRStatus(STATUS.PROCESSING, `Processing (${i + 1}/${canvases.length})`, (i + 1) / canvases.length);
+
                 const result = await EngineManager.runOCR(clean);
                 inferenceResults.push(result);
             } catch (error) {
@@ -1965,9 +1976,9 @@ async function globalInitialize() {
         const updatePerfUI = () => {
             const isIsolated = self.crossOriginIsolated;
             perfIcon.textContent = isIsolated ? "🔥" : "⚠️";
-            
+
             const mem = getMemoryStats();
-            const statusMsg = isIsolated 
+            const statusMsg = isIsolated
                 ? "🚀 High-performance mode: active. GPU and multi-threading enabled."
                 : "🐢 Compatibility mode: isolated features unavailable. Performance reduced.";
 
@@ -2213,7 +2224,7 @@ function initEventListeners() {
     if (autoCaptureBtn) {
         autoCaptureBtn.onclick = () => autoToggle?.click();
     }
-    
+
     if (speakLatestBtn) {
         speakLatestBtn.onclick = () => {
             const text = latestText?.textContent;
@@ -2224,10 +2235,8 @@ function initEventListeners() {
     }
 
     // 4. Engine & Settings Sync
-    if (engineSelector) {
-        engineSelector.onchange = (e) => switchEngineModular(e.target.value);
-    }
-    
+    // engineSelector.onchange removed (consolidated in initEventListeners_Part1)
+
     if (autoToggle) {
         autoToggle.onchange = (e) => {
             setSetting('autoCapture', e.target.checked);
@@ -2264,7 +2273,7 @@ function initEventListeners() {
 
     if (menuBtn) menuBtn.onclick = openMenu;
     if (menuBackdrop) menuBackdrop.onclick = (e) => { e.stopPropagation(); closeMenu(); };
-    
+
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
     if (menuInstall) menuInstall.onclick = () => {

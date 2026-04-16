@@ -1,0 +1,30 @@
+# Implementation Plan - Loop-Breaker Architectural Hardening
+
+Surgical removal of synthetic event loops and redundant listeners to resolve the "Infinite Engine Warm-up" bug.
+
+## User Review Required
+
+> [!CAUTION]
+> This plan identifies the **Root Cause** of the infinite loading: `settings.js` was programmatically firing 'change' events during UI syncs, which collided with the duplicated engine listeners in `app.js`.
+
+## Proposed Changes
+
+### 1. Settings Layer Hardening
+
+#### [MODIFY] [settings.js](file:///c:/Users/rober/.gemini/antigravity/scratch/personalOCR-Cloudflare/settings.js)
+- Remove `const event = new Event('change'); autoToggle.dispatchEvent(event);`.
+- **Reasoning**: Programmatic UI updates must never simulate user events. This is the primary source of the feedback loop.
+
+### 2. Event Bus Consolidation
+
+#### [MODIFY] [app.js](file:///c:/Users/rober/.gemini/antigravity/scratch/personalOCR-Cloudflare/app.js)
+- **Remove** redundant `engineSelector.onchange` assignment in `initEventListeners`.
+- **Reinforce** the single `addEventListener('change')` block in `initEventListeners_Part1` to handle all Paddle/Manga/Tesseract switching logic.
+- **Implement** a `switchingLock` (boolean) to prevent concurrent `switchEngineModular` calls from overlapping during async model loads.
+
+## Verification Plan
+
+### Manual Verification
+1. Load the app and change engines 5 times rapidly.
+2. **Success Criterion**: Verify in the console that `[ENGINE] switchEngineModular` is called **exactly once per click** and no "ignored switch" or "warm-up" spam occurs.
+3. Verify that the "Auto-Capture" toggle still updates visually without the synthetic event.

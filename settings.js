@@ -111,9 +111,6 @@ export function applySettingsToUI() {
     const autoToggle = document.querySelector("#auto-capture-toggle");
     if (autoToggle) {
         autoToggle.checked = normalizeBoolean(currentSettings.autoCapture, defaultSettings.autoCapture);
-        // Trigger the visual update in UI if there's a label
-        const event = new Event('change');
-        autoToggle.dispatchEvent(event);
     }
 
     // 3. Theme Toggle

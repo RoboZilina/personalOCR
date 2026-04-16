@@ -1,9 +1,16 @@
-/**
- * MangaOCR Engine Implementation (Dual-Session / Optimum Path)
- * Industry-standard Encoder + Decoder architecture for autoregressive inference.
- */
-import { isWebGPUSupported } from '../onnx/onnx_support.js';
+const M_STATUS = {
+    IDLE: 'idle',
+    PRE_LOADING: 'pre-loading',
+    DOWNLOADING: 'downloading',
+    LOADING: 'loading',
+    WARMING: 'warming-up',
+    READY: 'ready',
+    PROCESSING: 'processing',
+    ERROR: 'error'
+};
+
 export class MangaOCREngine {
+    static STATUS = M_STATUS;
     constructor(manifestUrl, options = {}) {
         this.id = 'manga';
         this.label = 'MangaOCR';
@@ -69,13 +76,12 @@ export class MangaOCREngine {
      */
     async load() {
         if (this.isLoaded && this.encoderSession && this.decoderSession) return;
-        const S = window.EngineManager?.STATUS || { LOADING: 'loading', DOWNLOADING: 'downloading', READY: 'ready', WARMING: 'warming-up' };
 
         // Non-blocking integrity ping
         this.checkAssets();
         
         try {
-            this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading manifest…', 0.1);
+            this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: downloading manifest…', 0.1);
             const manifestRes = await fetch(this.manifestUrl);
             if (!manifestRes.ok) throw new Error(`MangaOCR: Manifest load failed (${manifestRes.status})`);
             const manifest = await manifestRes.json();
@@ -87,7 +93,7 @@ export class MangaOCREngine {
             const executionProviders = useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
 
             // Sequential Loading (Hybrid: Remote Priority for Models)
-            this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: loading configuration…', 0.15);
+            this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: loading configuration…', 0.15);
             const [vocabRes, configRes, preprocRes] = await Promise.all([
                 fetch(modelBase + manifest.vocab.path),
                 fetch(modelBase + manifest.config.path),
@@ -109,21 +115,21 @@ export class MangaOCREngine {
             this.imageStd  = preproc.image_std  ?? [0.5, 0.5, 0.5];
             
             // Load Encoder (Remote)
-            this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading encoder…', 0.2);
+            this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: downloading encoder…', 0.2);
             const encoderPath = manifest.encoder.remote_url || (modelBase + manifest.encoder.path);
             let encoderBuffer = await fetchWithProgress(
                 encoderPath,
-                (p) => this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading encoder…', 0.2 + (p * 0.35))
+                (p) => this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: downloading encoder…', 0.2 + (p * 0.35))
             );
             this.encoderSession = await ort.InferenceSession.create(encoderBuffer, { executionProviders });
             encoderBuffer = null;
 
             // Load Decoder (Remote)
-            this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading decoder…', 0.6);
+            this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: downloading decoder…', 0.6);
             const decoderPath = manifest.decoder.remote_url || (modelBase + manifest.decoder.path);
             let decoderBuffer = await fetchWithProgress(
                 decoderPath,
-                (p) => this.reportStatus(S.DOWNLOADING, '🟡 MangaOCR: downloading decoder…', 0.6 + (p * 0.35))
+                (p) => this.reportStatus(M_STATUS.DOWNLOADING, '🟡 MangaOCR: downloading decoder…', 0.6 + (p * 0.35))
             );
             this.decoderSession = await ort.InferenceSession.create(decoderBuffer, { executionProviders });
             decoderBuffer = null;
@@ -139,12 +145,16 @@ export class MangaOCREngine {
             }
 
             this.isLoaded = true;
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] MangaOCR → ${S.READY}`);
-            this.reportStatus(S.READY, '🟢 MangaOCR: ready.');
+            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] MangaOCR → ${M_STATUS.READY}`);
+            this.reportStatus(M_STATUS.READY, '🟢 MangaOCR: ready.');
         } catch (err) {
             console.error("[MANGA-ERROR] Engine Load Failed:", err);
             this.isLoaded = false;
-            this.reportStatus(S.ERROR, `🔴 MangaOCR: ${err.message || 'Load Failed'}`);
+            try {
+                this.reportStatus(M_STATUS.ERROR, `🔴 MangaOCR: ${err.message || 'Load Failed'}`);
+            } catch (enumErr) {
+                console.warn("MangaOCR: Status report failed (enum/context error):", enumErr);
+            }
             throw err;
         }
     }

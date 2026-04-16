@@ -72,7 +72,7 @@ import {
 } from './js/paddle/paddle_core.js';
 
 import { TesseractEngine } from './js/tesseract/tesseract_engine.js';
-import { PaddleOCR } from './js/paddle/paddle_engine.js';
+import { PaddleOCR } from './js/paddle/paddle_engine.v38.js';
 import { MangaOCREngine } from './js/manga/manga_engine.js';
 
 /** Unified Readiness API (Hardening Phase) */

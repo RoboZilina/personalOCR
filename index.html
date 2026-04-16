@@ -2,6 +2,17 @@
 <html lang="ja">
 
 <head>
+    <script>
+    // Immediate Cache Surgery: Unregister stale service workers
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        for (const r of regs) {
+            console.warn("[CACHE-SURGERY] Unregistering stale Service Worker:", r.active?.scriptURL);
+            r.unregister();
+        }
+      }).catch(console.error);
+    }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal OCR — Master Dashboard</title>
@@ -458,7 +469,19 @@
     <!-- Scripts at the end of body -->
     <script src="./js/onnx/ort.min.js"></script>
     <script src="./js/tesseract/tesseract.min.js"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.v38.js"></script>
+    <script>
+        // Emergency Safety Boundary: Force splash dismissal after 20s even if scripts fail
+        setTimeout(() => {
+            const splash = document.getElementById('startup-splash');
+            if (splash && splash.style.display !== 'none') {
+                console.warn("[FAIL-SAFE] Emergency splash dismissal triggered from index.html.");
+                splash.style.transition = 'opacity 0.5s ease';
+                splash.style.opacity = '0';
+                setTimeout(() => splash.remove(), 500);
+            }
+        }, 20000);
+    </script>
 </body>
 
 </html>

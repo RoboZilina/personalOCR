@@ -19,6 +19,7 @@
     --border: #1f1f23;
     --shadow: 0 8px 32px rgba(0,0,0,0.5);
     --panic: #ef4444;
+    --warn: #f59e0b;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

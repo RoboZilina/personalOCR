@@ -429,7 +429,7 @@ const EngineManager = (() => {
     return {
         onReady, onLoading, onError, onStatusChange,
         switchEngine, preloadCoreEngines, disposeAllEngines,
-        runOCR, notifyStatus, _notifyStatus: notifyStatus,
+        runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
         getInfo: () => currentInfo,
         getEngineInstance: () => currentEngine, // Added for pinning
@@ -743,20 +743,22 @@ function applyPaddlePreprocessing(cropCanvas, lineCount) {
 
 /**
  * Unified preprocessing entry point. Delegates to the active engine's preprocess function.
- * @param {string} engineId - Active engine ID (used for debug logging only)
+ * @param {string} engineId - Active engine ID (used for trace logging only)
  * @param {HTMLCanvasElement} rawCanvas - The original crop
  * @param {string} mode - Preprocessing mode (adaptive, multi, etc.)
  * @param {number} lineCount - Number of lines (for Paddle)
  * @returns {HTMLCanvasElement[]} Array of one or more preprocessed canvases.
  */
 async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
-    if (!EngineManager.isReady()) {
-        if (getSetting('debug')) {
-            console.debug("[ENGINE-DEBUG] preprocess skipping wait (event-driven logic)");
-            console.debug("[ENGINE-DEBUG] preprocessForEngine() delegating to EngineManager");
-        }
+    const pinnedEngine = EngineManager.getEngineInstance();
+    
+    // Safety Fallback: Use Registry Preprocessor if instance is missing (e.g. during switch cycles)
+    if (!pinnedEngine || typeof pinnedEngine.preprocess !== 'function') {
+        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Instance missing preprocess, using manager fallback");
+        return await EngineManager.preprocess(rawCanvas, mode, lineCount);
     }
-    return await EngineManager.preprocess(rawCanvas, mode, lineCount);
+
+    return await pinnedEngine.preprocess(rawCanvas, mode, lineCount);
 }
 
 

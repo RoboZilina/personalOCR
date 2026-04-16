@@ -2066,6 +2066,25 @@ function initEventListeners_Part2() {
 }
 
 // 6.5 Global Initialization
+/**
+ * Dismisses the startup splash screen with a smooth fade-out.
+ */
+function dismissSplashScreen() {
+    const splash = document.getElementById('startup-splash');
+    if (!splash) return;
+
+    // Smooth transition
+    splash.classList.add('fade-out');
+
+    // Unlock interaction
+    document.body.classList.remove('loading-locked');
+
+    // Cleanup from DOM after transition
+    setTimeout(() => {
+        splash.remove();
+    }, 500);
+}
+
 async function globalInitialize() {
     // Phase 1: Materialize DOM Nodes (Race Condition Fix)
     selectWindowBtn = document.getElementById('select-window-btn');
@@ -2174,9 +2193,10 @@ async function globalInitialize() {
     // 2. Trigger actual engine load (Priority Pass)
     await switchEngineModular(savedEngine);
 
-    // 3. Background Optimization (Second Pass)
-    // Silently warm up the other core engine to enable instant hot-swapping
-    EngineManager.preloadCoreEngines();
+    // 3. Background Optimization (Honest Startup Pass)
+    // Silently warm up the other core engine to enable instant hot-swapping.
+    // We AWAIT this now to ensure the system is stable before splash dismissal.
+    await EngineManager.preloadCoreEngines();
 
     // 3. Post-load Mode Restoration (Deterministic)
     const engineInfo = EngineManager.getInfo();
@@ -2312,6 +2332,21 @@ async function globalInitialize() {
 
     // Phase 4: Consolidate Event Listeners (Fix for Race Conditions)
     initEventListeners();
+
+    // Final Move: Hand over the workspace to the user
+    // We use a small delay to ensure the DOM has settled after hydration
+    setTimeout(() => {
+        dismissSplashScreen();
+    }, 200);
+
+    // Safety: Force dismissal after 15s in case of an uncaught engine timeout
+    setTimeout(() => {
+        const splash = document.getElementById('startup-splash');
+        if (splash) {
+            console.warn("[INIT] Safety timeout triggered for splash screen.");
+            dismissSplashScreen();
+        }
+    }, 15000);
 }
 
 /** 6.6 UI Interaction Registry (Hydration Safety) */

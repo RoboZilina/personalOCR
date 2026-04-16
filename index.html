@@ -12,7 +12,14 @@
     <link rel="icon" href="icon-192.png">
 </head>
 
-<body>
+<body class="loading-locked"> 
+    <!-- Honest Startup: Full-screen stabilization overlay -->
+    <div id="startup-splash" class="startup-splash active">
+        <div class="splash-content">
+            <div class="minimal-spinner"></div>
+            <div class="splash-text">Initializing...</div>
+        </div>
+    </div>
     <div class="dashboard-root">
         <!-- GLOBAL CONTROL BAR -->
         <header class="app-header">

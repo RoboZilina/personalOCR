@@ -539,6 +539,7 @@ window.EngineManager = EngineManager;
  */
 async function switchEngineModular(id) {
     const normalizedId = id.replace(/_.+$/, "");
+    console.log('[TRACE] switchEngineModular requested engine =', normalizedId);
     if (getSetting('debug')) console.debug("[ENGINE-DEBUG] switchEngineModular() requested:", id, "normalized:", normalizedId);
 
     try {
@@ -835,6 +836,7 @@ function applyPaddlePreprocessing(cropCanvas, lineCount) {
  * @returns {HTMLCanvasElement[]} Array of one or more preprocessed canvases.
  */
 async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
+    console.log('[TRACE] preprocessForEngine called with engineId =', engineId);
     const pinnedEngine = EngineManager.getEngineInstance();
     
     // Safety Fallback: Use Registry Preprocessor if instance is missing (e.g. during switch cycles)

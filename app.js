@@ -333,6 +333,9 @@ const EngineManager = (() => {
      * State-Aware Engine Loader
      * Implements promise deduplication and background readiness.
      */
+    // Heavy engines that should load in worker
+    const HEAVY_ENGINES = new Set(['paddle', 'manga']);
+
     async function getOrLoadEngine(id, isSilent = false) {
         console.trace(`[ENGINE] getOrLoadEngine(${id})`);
 
@@ -347,7 +350,25 @@ const EngineManager = (() => {
         if (meta.state === 'ready') return meta.instance;
         if (meta.state === 'loading') return meta.loadPromise;
 
-        // 2. Start Loading Lifecycle
+        // 2. Heavy engines → worker path
+        if (HEAVY_ENGINES.has(id)) {
+            meta.state = 'loading';
+            const workerPromise = loadEngineInWorker(id)
+                .then(payload => rehydrateEngine(id, payload))
+                .then(instance => {
+                    meta.instance = instance;
+                    meta.state = 'ready';
+                    return instance;
+                })
+                .catch(err => {
+                    console.warn(`[ENGINE] Worker load failed for ${id}, falling back to main thread:`, err);
+                    return loadEngineMainThread(id, isSilent);
+                });
+            meta.loadPromise = workerPromise;
+            return workerPromise;
+        }
+
+        // 3. Start Loading Lifecycle (lightweight engines)
         meta.state = 'loading';
         const loadStartTime = performance.now();
 
@@ -419,6 +440,47 @@ const EngineManager = (() => {
         return loadPromise;
     }
 
+    /**
+     * Main thread loading fallback for heavy engines when worker fails.
+     */
+    async function loadEngineMainThread(id, isSilent = false) {
+        let meta = engineMetadata.get(id);
+        if (!meta) {
+            meta = { instance: null, state: 'not_loaded', loadPromise: null };
+            engineMetadata.set(id, meta);
+        }
+
+        meta.state = 'loading';
+
+        try {
+            const registryEntry = engines[id];
+            if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
+
+            const reporter = (state, text, progress) => {
+                if (state === STATUS.READY) meta.state = 'ready';
+                if (!isSilent || id === currentEngineId || state === STATUS.ERROR || window.VNOCR_DEBUG) {
+                    notifyStatus(state, text, progress, id);
+                }
+            };
+
+            const instance = registryEntry.factory({ reportStatus: reporter });
+
+            if (instance && typeof instance.load === 'function') {
+                await instance.load();
+            }
+
+            await _warmUpEngine(instance, id);
+
+            meta.instance = instance;
+            meta.state = 'ready';
+
+            return instance;
+        } catch (err) {
+            meta.state = 'error';
+            throw err;
+        }
+    }
+
     async function _warmUpEngine(engine, id) {
         if (engine._warmedUp) return;
         try {
@@ -483,19 +545,101 @@ const EngineManager = (() => {
     }
 
     /**
-     * Silent initialization of core engines (Paddle/Tesseract).
+     * Load engine in Web Worker.
+     * Spawns worker, listens for postMessage, resolves with payload.
+     */
+    async function loadEngineInWorker(id) {
+        const workerPath = id === 'paddle'
+            ? '/js/paddle/paddle_preload_worker.js?v=3.8.4'
+            : '/js/manga/manga_preload_worker.js?v=3.8.4';
+
+        return new Promise((resolve, reject) => {
+            const worker = new Worker(workerPath, { type: 'module' });
+
+            worker.onmessage = (e) => {
+                const { type, payload, error } = e.data;
+                if (type === 'ready') {
+                    worker.terminate();
+                    resolve(payload);
+                } else if (type === 'error') {
+                    worker.terminate();
+                    reject(new Error(error));
+                }
+            };
+
+            worker.onerror = (err) => {
+                worker.terminate();
+                reject(err);
+            };
+
+            worker.postMessage({ command: 'load', id });
+        });
+    }
+
+    /**
+     * Rehydrate engine from worker payload.
+     * Constructs instance, applies payload, returns ready instance.
+     */
+    async function rehydrateEngine(id, payload) {
+        const registryEntry = engines[id];
+        if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
+
+        const reporter = (state, text, progress) => {
+            notifyStatus(state, text, progress, id);
+        };
+
+        const instance = registryEntry.factory({ reportStatus: reporter });
+
+        if (instance.rehydrate && typeof instance.rehydrate === 'function') {
+            await instance.rehydrate(payload);
+        } else {
+            if (typeof instance.load === 'function') await instance.load();
+            if (typeof instance.warmUp === 'function') await instance.warmUp();
+        }
+
+        return instance;
+    }
+
+    /**
+     * Silent initialization of core engines.
+     * Paddle always loads in worker, Manga only if selected, Tesseract on main thread.
      */
     async function preloadCoreEngines() {
-        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Preloading core engines (Paddle/Tesseract)...");
+        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Preloading core engines...");
+
+        const savedEngine = getSetting('ocrEngine') || 'tesseract';
+        const preloadPromises = [];
+
+        // Tesseract: main thread (lightweight)
+        preloadPromises.push(getOrLoadEngine('tesseract', true));
+
+        // Paddle: ALWAYS in worker (heavy)
+        preloadPromises.push(
+            loadEngineInWorker('paddle')
+                .then(payload => rehydrateEngine('paddle', payload))
+                .catch(err => {
+                    console.warn('[ENGINE] Paddle worker preload failed, falling back:', err);
+                    return getOrLoadEngine('paddle', true);
+                })
+        );
+
+        // Manga: only in worker if selected
+        if (savedEngine === 'manga') {
+            preloadPromises.push(
+                loadEngineInWorker('manga')
+                    .then(payload => rehydrateEngine('manga', payload))
+                    .catch(err => {
+                        console.warn('[ENGINE] Manga worker preload failed, falling back:', err);
+                        return getOrLoadEngine('manga', true);
+                    })
+            );
+        }
+
         try {
-            // Parallel load for efficiency
-            await Promise.all([
-                getOrLoadEngine('paddle', true),
-                getOrLoadEngine('tesseract', true)
-            ]);
+            await Promise.all(preloadPromises);
             if (window.VNOCR_DEBUG) console.debug("[ENGINE] Core preloading complete.");
         } catch (err) {
-            console.warn("[ENGINE] Foreground preload partially failed:", err);
+            console.warn("[ENGINE] Preload partially failed:", err);
         }
     }
 
@@ -617,7 +761,7 @@ const EngineManager = (() => {
     return {
         onReady, onLoading, onError, onStatusChange,
         switchEngine, preloadCoreEngines, disposeAllEngines,
-        getOrLoadEngine, evictOtherEngines,
+        getOrLoadEngine, evictOtherEngines, loadEngineInWorker, rehydrateEngine, loadEngineMainThread,
         runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
         getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
@@ -716,6 +860,7 @@ async function switchEngineModular(id) {
         setOCRStatus(STATUS.ERROR, `🔴 ${errorMsg}`);
         if (engineSelector) engineSelector.disabled = false;
         if (modeSelector) modeSelector.disabled = false;
+        unfreezeCaptureButton(); // Prevent UI lock on error
         throw err;
     }
 }

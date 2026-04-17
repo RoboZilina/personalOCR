@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personalocr-v3.8.4-gold-patch1';
+const CACHE_NAME = 'personalocr-v3.8.4-gold-patch2';
 
 /**
  * Normalize URL to pathname-only for consistent cache keys.
@@ -23,6 +23,7 @@ const ASSETS = [
   '/icon-192.png',
   '/icon-512.png',
   '/js/manga/manga_engine.js?v=3.8.4',
+  '/js/manga/manga_preload_worker.js?v=3.8.4',
   '/js/onnx/onnx_support.js?v=3.8.4',
   '/js/onnx/ort-wasm-simd-threaded.jsep.mjs',
   '/js/onnx/ort-wasm-simd-threaded.jsep.wasm',
@@ -33,6 +34,7 @@ const ASSETS = [
   '/js/onnx/ort.min.js',
   '/js/paddle/paddle_core.js?v=3.8.4',
   '/js/paddle/paddle_engine.js?v=3.8.4',
+  '/js/paddle/paddle_preload_worker.js?v=3.8.4',
   '/js/tesseract/tesseract_engine.js?v=3.8.4',
   '/js/tesseract/worker.min.js',
   '/js/tesseract/tesseract.min.js',

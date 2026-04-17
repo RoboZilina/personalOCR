@@ -15,13 +15,17 @@ const logMemoryUsage = (context = "") => {
 };
 
 const getMemoryStats = () => {
-    if (performance && performance.memory) {
-        const { usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit } = performance.memory;
-        return {
-            used: (usedJSHeapSize / (1024 * 1024)).toFixed(1),
-            total: (totalJSHeapSize / (1024 * 1024)).toFixed(1),
-            limit: (jsHeapSizeLimit / (1024 * 1024)).toFixed(1)
-        };
+    try {
+        if (typeof performance !== 'undefined' && performance.memory) {
+            const { usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit } = performance.memory;
+            return {
+                used: parseFloat((usedJSHeapSize / (1024 * 1024)).toFixed(1)),
+                total: parseFloat((totalJSHeapSize / (1024 * 1024)).toFixed(1)),
+                limit: parseFloat((jsHeapSizeLimit / (1024 * 1024)).toFixed(1))
+            };
+        }
+    } catch (e) {
+        // Silently fail in environments without performance.memory
     }
     return null;
 };
@@ -368,7 +372,7 @@ const EngineManager = (() => {
             
             const meta = engineMetadata.get(id);
             if (!meta || meta.state !== 'ready') {
-                notifyStatus('loading', 'Loading…');
+                notifyStatus('loading', 'Loading…', null, id);
             }
 
             const instance = await getOrLoadEngine(id);
@@ -383,11 +387,11 @@ const EngineManager = (() => {
             currentInfo = { id, capabilities: currentCapabilities };
 
             isReady = true;
-            notifyStatus('ready', 'Ready');
+            notifyStatus('ready', 'Ready', null, id);
             return currentEngine;
         } catch (err) {
             isReady = false;
-            notifyStatus('error', '🔴 Load Failed');
+            notifyStatus('error', '🔴 Load Failed', null, id);
             throw err;
         } finally {
             switchingLock = false;
@@ -480,7 +484,7 @@ const EngineManager = (() => {
     }
 
     function getReadyStatus() {
-        const id = currentEngineId;
+        const id = currentEngineId || 'tesseract';
         const entry = engines[id];
         return entry?.readyStatus || '🟢 OCR Ready';
     }

@@ -77,8 +77,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Use the full request URL as cache key (including query params like ?v=3.8.4)
-  const cacheKey = event.request.url;
+  // Use pathname-only as cache key to prevent cross-origin cache issues
+  // Query params (like ?v=3.8.4) are for cache-busting only
+  const cacheKey = url.pathname;
 
   // Cache-First Strategy: Return cached version immediately if available,
   // otherwise fetch from network and cache the response

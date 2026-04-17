@@ -5,11 +5,17 @@ const path = require('path');
 const PORT = 8080;
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// Security: Disable COEP/COOP by default for local dev; enable with ENABLE_COEP=1 for testing
+// Security: COEP/COOP disabled by default for local dev; enable with ENABLE_COEP=1 for testing
+// WARNING: Production should always use COEP/COOP headers for cross-origin isolation
 const ENABLE_COEP = process.env.ENABLE_COEP === '1';
+if (!ENABLE_COEP) {
+    console.warn('[SERVER] COEP/COOP disabled. Cross-origin isolation not active. Use ENABLE_COEP=1 for production-like behavior.');
+}
+
 const MIME_TYPES = {
     '.html': 'text/html',
     '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
     '.png': 'image/png',

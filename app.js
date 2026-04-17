@@ -1506,7 +1506,11 @@ async function captureFrame(rect = null) {
                 setOCRStatus(STATUS.PROCESSING, `Processing (${i + 1}/${canvases.length})`, (i + 1) / canvases.length);
                 // Pinning: Pass pinnedEngine instance to runOCR
                 const result = await EngineManager.runOCR(clean, pinnedEngine);
-                if (captureGeneration !== myGen) return;
+                if (captureGeneration !== myGen) {
+                    releaseLock();
+                    canvases.forEach(c => { c.width = 0; c.height = 0; });
+                    return;
+                }
                 inferenceResults.push(result);
             } catch (error) {
                 console.error(`[GEN ${myGen}] [INFERENCE-ERROR] Execution failed for slice:`, i, error);
@@ -1516,7 +1520,11 @@ async function captureFrame(rect = null) {
         }
         perfStats.inference = performance.now() - infStart;
 
-        if (captureGeneration !== myGen) return;
+        if (captureGeneration !== myGen) {
+            releaseLock();
+            canvases.forEach(c => { c.width = 0; c.height = 0; });
+            return;
+        }
 
         inferenceResults.forEach(result => {
             if (!result) return;
@@ -1528,7 +1536,11 @@ async function captureFrame(rect = null) {
             if (text && text.trim()) ocrLines.push(text.trim());
         });
 
-        if (captureGeneration !== myGen) return;
+        if (captureGeneration !== myGen) {
+            releaseLock();
+            canvases.forEach(c => { c.width = 0; c.height = 0; });
+            return;
+        }
 
         // Post-processing
         const finalText = EngineManager.postprocess(ocrLines);

@@ -71,10 +71,24 @@ const server = http.createServer((req, res) => {
     // Normalize the path and ensure it's within project root
     const filePath = path.normalize(path.join(PROJECT_ROOT, decodedPath));
     
-    // Security check: use path.relative to robustly detect traversal attempts
-    // This works correctly on Windows (case-insensitive) and handles edge cases
-    const relativePath = path.relative(PROJECT_ROOT, filePath);
-    const isPathSafe = !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+    // Security check: resolve to absolute, follow symlinks, and verify containment
+    // Uses realpath to prevent symlink traversal attacks and case-normalization for Windows
+    let resolvedPath, resolvedRoot;
+    try {
+        resolvedPath = fs.realpathSync(filePath);
+        resolvedRoot = fs.realpathSync(PROJECT_ROOT);
+    } catch (e) {
+        // If realpath fails (e.g., path doesn't exist), use resolved path for check
+        resolvedPath = path.resolve(filePath);
+        resolvedRoot = path.resolve(PROJECT_ROOT);
+    }
+    
+    // Case-insensitive comparison for Windows, case-sensitive for Unix
+    const isWindows = process.platform === 'win32';
+    const comparePath = isWindows ? resolvedPath.toLowerCase() : resolvedPath;
+    const compareRoot = isWindows ? resolvedRoot.toLowerCase() : resolvedRoot;
+    
+    const isPathSafe = comparePath.startsWith(compareRoot + path.sep) || comparePath === compareRoot;
     
     if (!isPathSafe) {
         res.writeHead(403);

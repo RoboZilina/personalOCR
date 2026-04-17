@@ -323,6 +323,10 @@ const EngineManager = (() => {
 
         // 2. Start Loading Lifecycle
         meta.state = 'loading';
+
+        // ATOMIC FIX: Microtask barrier to eliminate ultra-tight races
+        await Promise.resolve();
+
         const loadStartTime = performance.now();
         meta.loadPromise = (async () => {
             try {

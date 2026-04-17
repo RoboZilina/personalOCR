@@ -140,8 +140,7 @@ function startSplashHintRotation() {
 /**
  * STATUS is now imported from js/core/status.js
  * All engines use the same canonical status constants.
-
-
+ */
 
 // ==========================================
 

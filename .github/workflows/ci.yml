@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, personalOCR-dev ]
+  pull_request:
+    branches: [ main, personalOCR-dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+    
+    - name: Display Node version
+      run: node --version
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Run audits
+      run: npm run audit

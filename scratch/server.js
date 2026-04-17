@@ -31,6 +31,9 @@ const MIME_TYPES = {
     '.wasm': 'application/wasm'
 };
 
+const ALLOWED_EXTENSIONS = Object.keys(MIME_TYPES);
+const BLOCKED_PATTERNS = /[\x00-\x1f\x7f]|\.{2,}|%2e%2e|%252e%252e/i;
+
 const server = http.createServer((req, res) => {
     // Security: Normalize and sanitize path to prevent directory traversal
     let requestedPath = req.url;
@@ -41,15 +44,32 @@ const server = http.createServer((req, res) => {
     // Remove any query parameters for file lookup
     const cleanPath = requestedPath.split('?')[0];
     
-    // Reject paths with null bytes (suspicious)
-    if (cleanPath.includes('\0')) {
+    // Reject paths with null bytes, suspicious encoded sequences, or traversal patterns
+    if (cleanPath.includes('\0') || BLOCKED_PATTERNS.test(cleanPath)) {
         res.writeHead(400);
         res.end('400 Bad Request');
         return;
     }
     
+    // URL-decode to catch encoded traversal attempts
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(cleanPath);
+    } catch (e) {
+        res.writeHead(400);
+        res.end('400 Bad Request - Invalid encoding');
+        return;
+    }
+    
+    // Reject decoded paths that contain traversal after decoding
+    if (BLOCKED_PATTERNS.test(decodedPath)) {
+        res.writeHead(403);
+        res.end('403 Forbidden');
+        return;
+    }
+    
     // Normalize the path and ensure it's within project root
-    const filePath = path.normalize(path.join(PROJECT_ROOT, cleanPath));
+    const filePath = path.normalize(path.join(PROJECT_ROOT, decodedPath));
     
     // Security check: use path.relative to robustly detect traversal attempts
     // This works correctly on Windows (case-insensitive) and handles edge cases
@@ -63,7 +83,15 @@ const server = http.createServer((req, res) => {
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
-    const contentType = MIME_TYPES[extname] || 'application/octet-stream';
+    
+    // Extension whitelist: only serve known safe file types
+    if (!ALLOWED_EXTENSIONS.includes(extname)) {
+        res.writeHead(403);
+        res.end('403 Forbidden - File type not allowed');
+        return;
+    }
+    
+    const contentType = MIME_TYPES[extname];
 
     fs.readFile(filePath, (error, content) => {
         if (error) {

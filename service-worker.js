@@ -1,5 +1,21 @@
 const CACHE_NAME = 'personalocr-v3.8.4-gold-patch1';
 
+/**
+ * Normalize URL to pathname-only for consistent cache keys.
+ * Strips query parameters to align install-time and runtime caching.
+ * @param {string} urlString - Full URL (may include query params like ?v=3.8.4)
+ * @returns {string} Normalized pathname
+ */
+function normalizeUrl(urlString) {
+  try {
+    const url = new URL(urlString, self.location.origin);
+    return url.pathname;
+  } catch (e) {
+    // Fallback: if URL parsing fails, return as-is (should not happen for same-origin)
+    return urlString.split('?')[0];
+  }
+}
+
 const ASSETS = [
   '/',
   '/app.js?v=3.8.4',
@@ -41,10 +57,30 @@ const ASSETS = [
 ];
 
 // 1. Installs Assets (Cache-First)
+// Normalize ASSETS to pathname-only to match fetch handler cache keys
+const NORMALIZED_ASSETS = ASSETS.map(normalizeUrl);
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      .then((cache) => cache.addAll(NORMALIZED_ASSETS))
+      .then(() => {
+        // Integrity check: verify cached keys match normalized assets
+        return caches.open(CACHE_NAME).then(cache => cache.keys()).then(keys => {
+          const cachedPaths = keys.map(r => new URL(r.url).pathname);
+          const missing = NORMALIZED_ASSETS.filter(a => a !== '/' && !cachedPaths.includes(a));
+          const extra = cachedPaths.filter(c => c !== '/' && !NORMALIZED_ASSETS.includes(c));
+          if (missing.length > 0) {
+            console.warn('[SW:INSTALL] Cache mismatch - missing assets:', missing);
+            // Auto-heal: re-populate missing assets
+            console.log('[SW:INSTALL] Auto-healing cache with missing assets...');
+            return cache.addAll(missing);
+          }
+          if (extra.length > 0) {
+            console.warn('[SW:INSTALL] Cache mismatch - unexpected extra assets:', extra);
+          }
+        });
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -79,7 +115,7 @@ self.addEventListener('fetch', (event) => {
 
   // Normalize cache key: use pathname only (strip query params for consistent caching)
   // This aligns with ASSETS list which now includes versioned URLs
-  const cacheKey = new Request(url.pathname, { method: 'GET' });
+  const cacheKey = new Request(normalizeUrl(event.request.url), { method: 'GET' });
 
   // Cache-First Strategy: Return cached version immediately if available,
   // otherwise fetch from network and cache the response.

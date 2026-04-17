@@ -325,6 +325,7 @@ const EngineManager = (() => {
 
         // 2. Start Loading Lifecycle
         meta.state = 'loading';
+        const loadStartTime = performance.now();
         meta.loadPromise = (async () => {
             try {
                 const registryEntry = engines[id];
@@ -351,10 +352,32 @@ const EngineManager = (() => {
                 meta.instance = instance;
                 meta.state = 'ready';
                 meta.loadPromise = null; // Clear promise once resolved
+                
+                // Observability: log successful load completion (gated by VNOCR_DEBUG)
+                const loadDuration = Math.round(performance.now() - loadStartTime);
+                if (window.VNOCR_DEBUG) {
+                    console.debug(`[ENGINE-METRIC] ${id} loaded successfully in ${loadDuration}ms (silent: ${isSilent})`);
+                }
+                // Telemetry hook for opt-in collection
+                if (window.VNOCR_TELEMETRY && typeof window.VNOCR_TELEMETRY === 'function') {
+                    window.VNOCR_TELEMETRY({ type: 'engine_loaded', engineId: id, duration: loadDuration, silent: isSilent });
+                }
+                
                 return instance;
             } catch (err) {
                 meta.state = 'error';
                 meta.loadPromise = null;
+                
+                // Observability: log error transition with timing (gated by VNOCR_DEBUG)
+                const loadDuration = Math.round(performance.now() - loadStartTime);
+                if (window.VNOCR_DEBUG) {
+                    console.warn(`[ENGINE-METRIC] ${id} failed after ${loadDuration}ms:`, err.message);
+                }
+                // Telemetry hook for opt-in error reporting
+                if (window.VNOCR_TELEMETRY && typeof window.VNOCR_TELEMETRY === 'function') {
+                    window.VNOCR_TELEMETRY({ type: 'engine_error', engineId: id, duration: loadDuration, error: err?.message });
+                }
+                
                 throw err;
             }
         })();
@@ -377,6 +400,7 @@ const EngineManager = (() => {
 
     /**
      * High-level switch with persistence and locking.
+     * Atomic update: only sets currentEngineId after successful load.
      */
     async function switchEngine(registryEntry) {
         const id = registryEntry.id;
@@ -387,16 +411,19 @@ const EngineManager = (() => {
         }
         switchingLock = true;
 
+        // Track target ID separately until load succeeds
+        const targetEngineId = id;
+
         try {
-            // Identity First (Enables correct status pill target)
-            currentEngineId = id;
-            
             const meta = engineMetadata.get(id);
             if (!meta || meta.state !== 'ready') {
-                notifyStatus('loading', 'Loading…', null, id);
+                notifyStatus('loading', 'Loading…', null, targetEngineId);
             }
 
             const instance = await getOrLoadEngine(id);
+            
+            // Atomic update: only set current IDs after successful load
+            currentEngineId = targetEngineId;
             currentEngine = instance;
 
             // Update Metadata for Pipeline compatibility
@@ -405,14 +432,16 @@ const EngineManager = (() => {
                 supportsMultiPass: registryEntry.supportsMultiPass || false,
                 isMultiLine: registryEntry.isMultiLine || false
             };
-            currentInfo = { id, capabilities: currentCapabilities };
+            currentInfo = { id: targetEngineId, capabilities: currentCapabilities };
 
             isReady = true;
-            notifyStatus('ready', 'Ready', null, id);
+            notifyStatus('ready', 'Ready', null, targetEngineId);
             return currentEngine;
         } catch (err) {
             isReady = false;
-            notifyStatus('error', '🔴 Load Failed', null, id);
+            // Report original error message for clarity
+            const errorMsg = err?.message || 'Unknown error';
+            notifyStatus(STATUS.ERROR, `🔴 Load Failed: ${errorMsg}`, null, targetEngineId);
             throw err;
         } finally {
             switchingLock = false;
@@ -636,7 +665,8 @@ async function switchEngineModular(id) {
 
     } catch (err) {
         console.error('[ENGINE-ERROR] Switch failed:', err);
-        setOCRStatus('error', '🔴 Factory Missing');
+        const errorMsg = err?.message || 'Unknown error';
+        setOCRStatus(STATUS.ERROR, `🔴 ${errorMsg}`);
         if (engineSelector) engineSelector.disabled = false;
         if (modeSelector) modeSelector.disabled = false;
     }
@@ -728,11 +758,18 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
     if (!ocrStatus || !statusLabel) return;
 
     // 2. Silent Preload Guard
-    // If update is from an engine that isn't the current target, discard unless it's an error.
+    // If update is from an engine that isn't the current target, discard unless it's an error or READY.
+    // Allow READY from background engines so UI can reflect successful preloads.
     // Only filter if sourceId is explicitly provided (defined) and different from activeId.
-    const activeId = EngineManager.getInfo().id;
-    if (typeof sourceId === 'string' && sourceId !== activeId && state !== STATUS.ERROR) {
-        if (getSetting('debug')) console.debug(`[STATUS-DEBUG] Filtering silent preload status from ${sourceId}`);
+    // Guard against uninitialized EngineManager or null getInfo() during early init.
+    const activeInfo = (typeof EngineManager !== 'undefined' && EngineManager.getInfo) ? EngineManager.getInfo() : {};
+    const activeId = activeInfo?.id || null;
+    
+    // Filter only LOADING/PROCESSING/DOWNLOADING from non-active engines
+    // Allow ERROR (always show errors) and READY (show successful preloads)
+    const isNoisyProgressState = [STATUS.LOADING, STATUS.DOWNLOADING, STATUS.WARMING, STATUS.PROCESSING].includes(state);
+    if (typeof sourceId === 'string' && sourceId !== activeId && isNoisyProgressState) {
+        if (getSetting('debug')) console.debug(`[STATUS-DEBUG] Filtering silent preload progress from ${sourceId} (active: ${activeId}, state: ${state})`);
         return;
     }
 

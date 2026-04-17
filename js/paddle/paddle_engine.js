@@ -355,8 +355,9 @@ export class PaddleOCR {
             return { text: '' };
         } finally {
             if (window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] PaddleOCR: Double-release of busy flag detected!`);
+            const wasBusy = this.busy;
             this.busy = false;
-            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] PaddleOCR busy flag released`);
+            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] PaddleOCR busy flag released (was: ${wasBusy})`);
         }
     }
 

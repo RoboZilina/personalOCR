@@ -298,8 +298,9 @@ export class MangaOCREngine {
             return { text: '' };
         } finally {
             if (window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] MangaOCR: Double-release of busy flag detected!`);
+            const wasBusy = this.busy;
             this.busy = false;
-            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] MangaOCR busy flag released`);
+            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] MangaOCR busy flag released (was: ${wasBusy})`);
         }
     }
 

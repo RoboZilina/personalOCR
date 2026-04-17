@@ -853,9 +853,13 @@ async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
         }
     }
     
-    // Final Fallback: Return raw canvas wrapped in array to keep pipeline alive
-    if (window.VNOCR_DEBUG) console.debug("[ENGINE] No preprocess available, returning raw canvas");
-    return [rawCanvas];
+    // Final Fallback: Clone raw canvas to prevent pipeline from destroying original
+    if (window.VNOCR_DEBUG) console.debug("[ENGINE] No preprocess available, returning cloned canvas");
+    const cloned = document.createElement('canvas');
+    cloned.width = rawCanvas.width;
+    cloned.height = rawCanvas.height;
+    cloned.getContext('2d').drawImage(rawCanvas, 0, 0);
+    return [cloned];
 }
 
 
@@ -1768,7 +1772,7 @@ function pickBestMultiPassResult(results) {
         counts[r.text] = (counts[r.text] || 0) + 1;
     }
     const majority = Object.entries(counts).find(([t, c]) => c >= 3);
-    if (majority) return majority[1] >= 3 ? majority[0] : null; // Safety refinement based on user logic
+    if (majority) return majority[0]; // Return the text (index 0), not the count (index 1)
 
     // 2. Highest confidence
     const bestByConf = results.reduce((a, b) =>
@@ -2312,7 +2316,13 @@ async function globalInitialize() {
         if (historyContent) {
             const savedV2 = localStorage.getItem('vn-ocr-public-history-v2');
             if (savedV2) {
-                const lines = JSON.parse(savedV2);
+                let lines;
+                try {
+                    lines = JSON.parse(savedV2);
+                } catch (e) {
+                    console.warn("[INIT] Failed to parse history from localStorage:", e);
+                    lines = [];
+                }
                 lines.reverse().forEach(line => {
                     const clean = line.replace(/\s+/g, '').trim();
                     if (!clean) return;

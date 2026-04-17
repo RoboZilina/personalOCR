@@ -250,6 +250,27 @@ const EngineManager = (() => {
 
     // Internal State Machine (Gold v3.8 Compliance)
     const engineMetadata = new Map(); // id -> { instance, state, loadPromise }
+
+    // Memory guard: evict heavy engines when switching
+    function evictOtherEngines(activeId) {
+        const KEEP_CACHED = new Set(['paddle', 'tesseract']); // engines allowed to stay in memory
+
+        for (const [id, meta] of engineMetadata.entries()) {
+            if (id === activeId) continue;          // never evict active engine
+            if (KEEP_CACHED.has(id)) continue;      // keep paddle/tesseract cached
+
+            if (meta.instance) {
+                try {
+                    meta.instance.dispose?.();
+                } catch (e) {
+                    console.warn(`[ENGINE] dispose failed for ${id}`, e);
+                }
+            }
+
+            engineMetadata.delete(id);
+        }
+    }
+
     let currentEngineId = 'tesseract'; // Default starting point
     let currentEngine = null;
     let switchingLock = false;
@@ -292,9 +313,12 @@ const EngineManager = (() => {
     function notifyStatus(state, text, progress = null, targetId = null) {
         const id = targetId || currentEngineId;
         const label = ENGINE_LABELS[id] || id;
-        
+
+        // Guard: ensure text is a string
+        const safeText = String(text || '');
+
         // Format logic: Only prepend engine name if it's not already there
-        const statusText = text.includes('—') ? text : `${label} — ${text}`;
+        const statusText = safeText.includes('—') ? safeText : `${label} — ${safeText}`;
 
         if (state === STATUS.READY) emit('ready', statusText);
         if (state === STATUS.LOADING || state === STATUS.DOWNLOADING || state === STATUS.WARMING) emit('loading', statusText);
@@ -368,20 +392,23 @@ const EngineManager = (() => {
                 return instance;
             } catch (err) {
                 meta.state = 'error';
+                meta._lastError = err?.message; // Capture for finally block
                 throw err;
             } finally {
                 meta.loadPromise = null; // Always clear promise in both success and error paths
 
                 // Observability: log error transition with timing (gated by VNOCR_DEBUG)
                 // Note: Only log if we came from catch (meta.state === 'error')
-                if (meta.state === 'error') {
+                if (meta.state === 'error' && meta._lastError) {
                     const loadDuration = Math.round(performance.now() - loadStartTime);
+                    const errorMsg = meta._lastError;
                     if (window.VNOCR_DEBUG) {
-                        console.warn(`[ENGINE-METRIC] ${id} failed after ${loadDuration}ms:`, err?.message);
+                        console.warn(`[ENGINE-METRIC] ${id} failed after ${loadDuration}ms:`, errorMsg);
                     }
                     if (window.VNOCR_TELEMETRY && typeof window.VNOCR_TELEMETRY === 'function') {
-                        window.VNOCR_TELEMETRY({ type: 'engine_error', engineId: id, duration: loadDuration, error: err?.message });
+                        window.VNOCR_TELEMETRY({ type: 'engine_error', engineId: id, duration: loadDuration, error: errorMsg });
                     }
+                    meta._lastError = null; // Clean up
                 }
             }
         })();
@@ -590,7 +617,7 @@ const EngineManager = (() => {
     return {
         onReady, onLoading, onError, onStatusChange,
         switchEngine, preloadCoreEngines, disposeAllEngines,
-        getOrLoadEngine,
+        getOrLoadEngine, evictOtherEngines,
         runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
         getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
@@ -654,6 +681,9 @@ async function switchEngineModular(id) {
             ...registryEntry,
             id: normalizedId
         });
+
+        // Memory guard: evict heavy engines (MangaOCR ~1.2GB) when not active
+        EngineManager.evictOtherEngines(id);
 
         // 4) Restore UI Selectors
         if (engineSelector) {

@@ -31,7 +31,7 @@ const ASSETS = [
   '/js/onnx/ort-wasm-threaded.wasm',
   '/js/onnx/ort-wasm.wasm',
   '/js/onnx/ort.min.js',
-  '/js/paddle/paddle_core.js?v=gold_3.8.4',
+  '/js/paddle/paddle_core.js?v=3.8.4',
   '/js/paddle/paddle_engine.js?v=3.8.4',
   '/js/tesseract/tesseract_engine.js?v=3.8.4',
   '/js/tesseract/worker.min.js',
@@ -63,7 +63,7 @@ const NORMALIZED_ASSETS = ASSETS.map(normalizeUrl);
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(NORMALIZED_ASSETS))
+      .then((cache) => cache.addAll(ASSETS))
       .then(() => {
         // Integrity check: verify cached keys match normalized assets
         return caches.open(CACHE_NAME).then(cache => cache.keys()).then(keys => {
@@ -120,7 +120,7 @@ self.addEventListener('fetch', (event) => {
   // Cache-First Strategy: Return cached version immediately if available,
   // otherwise fetch from network and cache the response.
   event.respondWith(
-    caches.match(cacheKey).then((cachedResponse) => {
+    caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
@@ -130,13 +130,13 @@ self.addEventListener('fetch', (event) => {
         if (networkResponse && networkResponse.status === 200) {
           const cache = await caches.open(CACHE_NAME);
           // Must clone before reading/returning the response
-          // Use normalized pathname as key (consistent with ASSETS)
-          await cache.put(cacheKey, networkResponse.clone());
+          // Store with exact URL (including version query params)
+          await cache.put(event.request, networkResponse.clone());
         }
         return networkResponse;
       }).catch(async () => {
         // Network failed: try to find any cached version
-        const fallbackMatch = await caches.match(cacheKey);
+        const fallbackMatch = await caches.match(event.request);
         if (fallbackMatch) {
           return fallbackMatch;
         }

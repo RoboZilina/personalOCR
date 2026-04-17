@@ -7,8 +7,9 @@
     <title>Personal OCR — Master Dashboard</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.json">
+    <!-- CSP: wasm-unsafe-eval required for ONNX Runtime WASM execution -->
     <meta http-equiv="Content-Security-Policy"
-        content="script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; connect-src 'self' data: blob: https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev; worker-src 'self' blob:;">
+        content="script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' data: blob: https://pub-77a4ba72da6d4b9e892b6511ae694813.r2.dev; worker-src 'self' blob:;">
     <link rel="icon" href="icon-192.png">
 </head>
 

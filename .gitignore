@@ -1,5 +1,4 @@
 models/manga/*.onnx
-models/manga/vocab.json
 
 # Dependencies and CI caches
 node_modules/

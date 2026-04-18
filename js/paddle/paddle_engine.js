@@ -104,9 +104,9 @@ export class PaddleOCR {
             ort.env.wasm.simd = true;
             console.log(`[ENGINE] WASM Configuration — isolated: ${isIsolated}, numThreads: ${threads}`);
 
-            // Enable WebGPU backend for PaddleOCR when available (fallback to WASM).
-            const useWebGPU = await isWebGPUSupported();
-            const executionProviders = useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+            // Force WASM backend for PaddleOCR.
+            // WebGPU has MaxPool ceil() incompatibility: "using ceil() in shape computation is not yet supported"
+            const executionProviders = ['wasm'];
 
             // Load detection model (Hybrid: Remote Priority)
             this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1);

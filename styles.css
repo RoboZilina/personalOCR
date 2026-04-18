@@ -204,7 +204,7 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
 
 .action-btn { background: var(--accent); color: #000; padding: 0 32px; font-weight: 800; font-size: 16px; border: none; border-radius: 12px; cursor: pointer; box-shadow: 0 6px 25px var(--accent-glow); transition: 0.2s; height: 60px; width: 300px; flex-shrink: 0; }
 .action-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
-.action-btn:disabled, .btn.disabled { background: var(--border); color: var(--text-dim); box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+.action-btn:disabled, .btn.disabled { background: var(--border); color: var(--text); box-shadow: none; cursor: not-allowed; opacity: 0.5; }
 
 .auto-btn {
     padding: 4px 10px;
@@ -312,12 +312,12 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
 }
 
 /* Warming-up: amber, shows --progress fill */
-.status-pill.warming-up {
+.status-pill.warming {
     color: #fbbf24;
     border-color: rgba(251, 191, 36, 0.4);
     box-shadow: 0 0 12px rgba(251, 191, 36, 0.1);
 }
-.status-pill.warming-up::before {
+.status-pill.warming::before {
     background: rgba(251, 191, 36, 0.15);
 }
 

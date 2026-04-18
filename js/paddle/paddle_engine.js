@@ -2,6 +2,14 @@ import { fetchWithProgress, canvasToFloat32Tensor } from './paddle_core.js?v=3.8
 import { isWebGPUSupported } from '../onnx/onnx_support.js?v=3.8.4';
 import { STATUS } from '../core/status.js?v=3.8.4';
 
+function getOrtRuntime() {
+    const ortRuntime = globalThis.ort;
+    if (!ortRuntime) {
+        throw new Error('ONNX Runtime is not initialized (globalThis.ort is undefined)');
+    }
+    return ortRuntime;
+}
+
 export class PaddleOCR {
     static STATUS = STATUS;
     constructor(manifestUrl, wasmBasePath, updateStatus) {
@@ -85,6 +93,8 @@ export class PaddleOCR {
         // Non-blocking integrity ping
         this.checkAssets();
 
+        const ortRuntime = getOrtRuntime();
+
         try {
             this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: loading manifest…');
             const res = await fetch(this.manifestUrl);
@@ -100,8 +110,8 @@ export class PaddleOCR {
             // Configure ONNX Runtime WASM Fallback
             const isIsolated = self.crossOriginIsolated;
             const threads = isIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
-            ort.env.wasm.numThreads = threads; 
-            ort.env.wasm.simd = true;
+            ortRuntime.env.wasm.numThreads = threads; 
+            ortRuntime.env.wasm.simd = true;
             console.log(`[ENGINE] WASM Configuration — isolated: ${isIsolated}, numThreads: ${threads}`);
 
             // Force WASM backend for PaddleOCR.
@@ -116,7 +126,7 @@ export class PaddleOCR {
                 (p) => this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading detection model…', 0.1 + (p * 0.4))
             );
             this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: initializing detection…', 0.5);
-            this.detSession = await ort.InferenceSession.create(detBuffer, { executionProviders });
+            this.detSession = await ortRuntime.InferenceSession.create(detBuffer, { executionProviders });
             console.log(`[ENGINE] PaddleOCR Detection Session — Active Backend: ${this.detSession.executionProvider || 'unknown'}`);
             detBuffer = null; // Memory Guard: Release buffer immediately after session creation
             await new Promise(resolve => setTimeout(resolve, 50)); // Memory Guard: Yield to allow GC breathing room
@@ -129,7 +139,7 @@ export class PaddleOCR {
                 (p) => this.reportStatus(STATUS.DOWNLOADING, '🟡 PaddleOCR: downloading recognition model…', 0.6 + (p * 0.3))
             );
             this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: initializing recognition…', 0.9);
-            this.recSession = await ort.InferenceSession.create(recBuffer, { executionProviders });
+            this.recSession = await ortRuntime.InferenceSession.create(recBuffer, { executionProviders });
             console.log(`[ENGINE] PaddleOCR Recognition Session — Active Backend: ${this.recSession.executionProvider || 'unknown'}`);
             recBuffer = null; // Memory Guard: Release buffer
 
@@ -173,6 +183,8 @@ export class PaddleOCR {
         if (this._warmedUp) return;
         this._warmedUp = true;
 
+        const ortRuntime = getOrtRuntime();
+
         if (!this.detSession || !this.recSession) return;
         
         try {
@@ -181,14 +193,14 @@ export class PaddleOCR {
 
             // Warm up Detection Model (960x960)
             const detShape = [1, 3, 960, 960];
-            const detDummy = new ort.Tensor('float32', new Float32Array(1 * 3 * 960 * 960), detShape);
+            const detDummy = new ortRuntime.Tensor('float32', new Float32Array(1 * 3 * 960 * 960), detShape);
             const detFeeds = {};
             detFeeds[this.detSession.inputNames[0]] = detDummy;
             await this.detSession.run(detFeeds);
 
             // Warm up Recognition Model (48x320)
             const recShape = [1, 3, 48, 320];
-            const recDummy = new ort.Tensor('float32', new Float32Array(1 * 3 * 48 * 320), recShape);
+            const recDummy = new ortRuntime.Tensor('float32', new Float32Array(1 * 3 * 48 * 320), recShape);
             const recFeeds = {};
             recFeeds[this.recSession.inputNames[0]] = recDummy;
             await this.recSession.run(recFeeds);
@@ -202,6 +214,8 @@ export class PaddleOCR {
     async detect(canvas) {
         if (!this.detSession) return { boxes: [] };
 
+        const ortRuntime = getOrtRuntime();
+
         try {
 
             const inputSize = this.manifest.det.input_size || [960, 960];
@@ -210,7 +224,7 @@ export class PaddleOCR {
             const tensorData = canvasToFloat32Tensor(canvas, inputSize, this.normalize);
             if (!tensorData) return { boxes: [] };
             
-            const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, h, w]);
+            const inputTensor = new ortRuntime.Tensor('float32', tensorData, [1, 3, h, w]);
 
             const feeds = {};
             feeds[this.detSession.inputNames[0]] = inputTensor;
@@ -318,6 +332,7 @@ export class PaddleOCR {
     // Task 3: Add batch recognition method
     async recognizeLines(lineTensors) {
         if (!lineTensors.length) return [];
+        const ortRuntime = getOrtRuntime();
         if (lineTensors.length === 1) {
             const feeds = { [this.recSession.inputNames[0]]: lineTensors[0] };
             const out = await this.recSession.run(feeds);
@@ -326,7 +341,7 @@ export class PaddleOCR {
         const first = lineTensors[0];
         const [_, C, H, W] = first.dims;
         const N = lineTensors.length;
-        const stacked = new ort.Tensor(
+        const stacked = new ortRuntime.Tensor(
             first.type,
             new (first.data.constructor)(N * C * H * W),
             [N, C, H, W]
@@ -346,6 +361,8 @@ export class PaddleOCR {
             return { text: '' };
         }
 
+        const ortRuntime = getOrtRuntime();
+
         const start = performance.now();
         try {
             this.busy = true;
@@ -360,7 +377,7 @@ export class PaddleOCR {
             const tensorData = canvasToFloat32Tensor(cropCanvas, inputSize, this.normalize, this.recognitionBuffer);
             if (!tensorData) return { text: '' };
             
-            const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, h, w]);
+            const inputTensor = new ortRuntime.Tensor('float32', tensorData, [1, 3, h, w]);
 
             // Task 1: Profile rec inference
             const recStart = performance.now();

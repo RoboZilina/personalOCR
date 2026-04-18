@@ -1,3 +1,4 @@
+import '/js/onnx/ort.min.js?v=3.8.4';
 import { PaddleOCR } from './paddle_engine.js?v=3.8.4';
 
 self.onmessage = async (e) => {

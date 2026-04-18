@@ -76,7 +76,7 @@ export class MangaOCREngine {
      * Pings local config and remote models for Cloudflare compatibility.
      */
     async checkAssets() {
-        const modelBase = "./models/manga/";
+        const modelBase = "/models/manga/";
         const assets = [
             { url: modelBase + 'vocab.json', type: 'local' },
             { url: modelBase + 'config.json', type: 'local' },
@@ -89,10 +89,13 @@ export class MangaOCREngine {
             const results = await Promise.all(assets.map(a => fetch(a.url, { method: 'HEAD' })));
             const allFound = results.every(res => res.ok);
             
-            const diagAssets = document.getElementById('diag-assets');
-            if (diagAssets) {
-                diagAssets.textContent = allFound ? '✅ FOUND' : '❌ MISSING';
-                diagAssets.className = allFound ? 'diag-status-ok' : 'diag-status-fail';
+            // Only update DOM if we're in the main thread (not in a worker)
+            if (typeof document !== 'undefined') {
+                const diagAssets = document.getElementById('diag-assets');
+                if (diagAssets) {
+                    diagAssets.textContent = allFound ? '✅ FOUND' : '❌ MISSING';
+                    diagAssets.className = allFound ? 'diag-status-ok' : 'diag-status-fail';
+                }
             }
             return allFound;
         } catch (err) {
@@ -116,7 +119,7 @@ export class MangaOCREngine {
             if (!manifestRes.ok) throw new Error(`MangaOCR: Manifest load failed (${manifestRes.status})`);
             const manifest = await manifestRes.json();
             
-            const modelBase = "./models/manga/";
+            const modelBase = "/models/manga/";
 
             // Enable WebGPU backend for MangaOCR when available (fallback to WASM).
             const useWebGPU = await isWebGPUSupported();

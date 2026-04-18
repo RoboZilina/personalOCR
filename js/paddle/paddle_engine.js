@@ -48,7 +48,7 @@ export class PaddleOCR {
      * Pings local config/dict and remote models for Cloudflare compatibility.
      */
     async checkAssets() {
-        const modelBase = "./models/paddle/";
+        const modelBase = "/models/paddle/";
         
         // Load manifest locally first to get remote URLs
         try {
@@ -66,10 +66,13 @@ export class PaddleOCR {
             const results = await Promise.all(assets.map(a => fetch(a.url, { method: 'HEAD' })));
             const allFound = results.every(res => res.ok);
             
-            const diagAssets = document.getElementById('diag-assets');
-            if (diagAssets) {
-                diagAssets.textContent = allFound ? '✅ FOUND' : '❌ MISSING';
-                diagAssets.className = allFound ? 'diag-status-ok' : 'diag-status-fail';
+            // Only update DOM if we're in the main thread (not in a worker)
+            if (typeof document !== 'undefined') {
+                const diagAssets = document.getElementById('diag-assets');
+                if (diagAssets) {
+                    diagAssets.textContent = allFound ? '✅ FOUND' : '❌ MISSING';
+                    diagAssets.className = allFound ? 'diag-status-ok' : 'diag-status-fail';
+                }
             }
             return allFound;
         } catch (err) {
@@ -87,8 +90,8 @@ export class PaddleOCR {
             const res = await fetch(this.manifestUrl);
             this.manifest = await res.json();
 
-            // Standardize model base path
-            const modelBase = "./models/paddle/";
+            // Standardize model base path (absolute for worker compatibility)
+            const modelBase = "/models/paddle/";
 
             if (this.manifest.normalize) {
                 this.normalize = this.manifest.normalize;
@@ -131,7 +134,7 @@ export class PaddleOCR {
             recBuffer = null; // Memory Guard: Release buffer
 
             // Load dictionary
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.LOADING} (Dictionary)`);
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.LOADING} (Dictionary)`);
             this.reportStatus(STATUS.LOADING, '🟡 PaddleOCR: loading dictionary…', 0.95);
             const dictPath = this.manifest.dict.remote_url || (modelBase + this.manifest.dict.path);
             const dictRes = await fetch(dictPath);
@@ -144,12 +147,12 @@ export class PaddleOCR {
             }
 
             // Warm-up WebGPU Shaders (if active)
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.WARMING}`);
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.WARMING}`);
             this.reportStatus(STATUS.WARMING, '🟡 PaddleOCR: warming up…', 0.98);
             await this.warmUp();
 
             this.isLoaded = true;
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.READY}`);
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG) console.debug(`[ENGINE] PaddleOCR → ${STATUS.READY}`);
             this.reportStatus(STATUS.READY, '🟢 PaddleOCR: ready.');
         } catch (err) {
             console.error("PaddleOCR: Load Error:", err);
@@ -379,7 +382,7 @@ export class PaddleOCR {
 
             const decoded = this._ctcGreedyDecode(logits, dims);
             
-            if (window.VNOCR_DEBUG) {
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG) {
                 const elapsed = (performance.now() - start).toFixed(1);
                 console.debug(`[ENGINE] PaddleOCR inference took ${elapsed}ms`);
             }
@@ -392,10 +395,10 @@ export class PaddleOCR {
             console.error("[ENGINE] PaddleOCR Inference Error:", err);
             return { text: '' };
         } finally {
-            if (window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] PaddleOCR: Double-release of busy flag detected!`);
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG && !this.busy) console.warn(`[${new Date().toISOString()}] [ENGINE] PaddleOCR: Double-release of busy flag detected!`);
             const wasBusy = this.busy;
             this.busy = false;
-            if (window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] PaddleOCR busy flag released (was: ${wasBusy})`);
+            if (typeof window !== 'undefined' && window.VNOCR_DEBUG) console.debug(`[${new Date().toISOString()}] [ENGINE] PaddleOCR busy flag released (was: ${wasBusy})`);
         }
     }
 

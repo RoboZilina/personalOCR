@@ -78,13 +78,14 @@
                 </div>
             </div>
             <div class="header-right">
-                <div id="status-row" style="display:flex; align-items:center; gap:8px;">
+                <div id="status-row" style="display:flex; align-items:center; gap:8px; position:relative;">
                     <div id="ocr-status" class="status-pill loading">
                         <span id="status-text">🔴 Loading...</span>
                     </div>
-                    <span id="perf-icon" style="cursor:pointer; font-size:16px; user-select:none; margin-left: 4px;"></span>
+                    <span id="perf-icon" style="cursor:pointer; font-size:16px; user-select:none; margin-left: 4px;" aria-label="Hardware performance status" role="button" tabindex="0"></span>
+                    <!-- Perf diagnostic panel: anchored below the icon within status-row -->
+                    <div id="perf-info" class="perf-diagnostic-box" style="display:none; position:absolute; top:calc(100% + 10px); right:0; width:280px; z-index:2000;"></div>
                 </div>
-                <div id="perf-info" class="perf-diagnostic-box" style="display:none;"></div>
                 <button id="select-window-btn" class="btn primary"><span>Select Window Source</span></button>
             </div>
         </header>
@@ -475,6 +476,26 @@
             align-items: center;
         }
         .hidden { display: none; }
+
+        /* Performance diagnostic panel rows */
+        .pd-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 12px;
+        }
+        .pd-row:last-of-type { border-bottom: none; }
+        .pd-key { color: #a1a1aa; }
+        .pd-val { color: #fff; font-weight: 600; text-align: right; }
+        .pd-footer {
+            margin-top: 10px;
+            font-size: 10px;
+            color: #52525b;
+            text-align: center;
+            letter-spacing: 0.3px;
+        }
     </style>
 
     <!-- Scripts at the end of body -->

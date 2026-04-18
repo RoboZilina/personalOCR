@@ -2603,39 +2603,93 @@ function dismissSplashScreen() {
 }
 
 /**
- * Observational Performance Dashboard (Gold v3.8 Restoration)
- * Updates UI markers for Hardware Acceleration/Isolation without triggering reloads.
+ * Observational Performance Dashboard (Gold v3.8+)
+ * Probes hardware capabilities once on startup, then surfaces them
+ * in a togglable panel on icon click.
  */
+
+// Cached results so we only call navigator.gpu.requestAdapter() once.
+let _perfCache = null;
+
+async function probePerformanceCapabilities() {
+    if (_perfCache) return _perfCache;
+    const isIsolated = !!window.crossOriginIsolated;
+    const hasWebGPU = await vnIsWebGPUSupported().catch(() => false);
+    const threads = isIsolated ? (navigator.hardwareConcurrency || 1) : 1;
+    _perfCache = { isIsolated, hasWebGPU, threads };
+    return _perfCache;
+}
+
 async function updatePerformanceStatus() {
     if (!perfIcon || !perfInfo) return;
-    
-    try {
-        const isIsolated = window.crossOriginIsolated;
-        const hasWebGPU = await vnIsWebGPUSupported();
-        
-        let icon = '⚪';
-        let label = 'Standard Mode (Single-Threaded)';
-        let details = `Isolation: ${isIsolated ? 'Active' : 'Disabled'} | WebGPU: ${hasWebGPU ? 'Supported' : 'Not Detected'}`;
 
-        if (isIsolated) {
-            icon = '🟡';
-            label = 'Isolated Mode (High-Performance Threads)';
-            if (hasWebGPU) {
-                icon = '🟢';
-                label = 'Neural Acceleration Active (WebGPU)';
-            }
+    try {
+        const { isIsolated, hasWebGPU, threads } = await probePerformanceCapabilities();
+
+        // Tier logic
+        let icon, label, tierColor;
+        if (isIsolated && hasWebGPU) {
+            icon = '🟢'; label = 'Neural Acceleration (WebGPU + Threads)'; tierColor = '#34d399';
+        } else if (isIsolated) {
+            icon = '🟡'; label = 'High-Performance Threads (No WebGPU)'; tierColor = '#fbbf24';
+        } else {
+            icon = '⚪'; label = 'Standard Mode (Single-Threaded WASM)'; tierColor = '#a1a1aa';
         }
 
         perfIcon.textContent = icon;
-        perfIcon.title = label;
-        perfInfo.textContent = details;
+        perfIcon.title = label + ' — click for details';
 
-        if (window.VNOCR_DEBUG) {
-            console.debug(`[PERF-SYNC] Icon: ${icon} | ${label}`);
-        }
+        // Build panel content (called initially and on every open to refresh heap)
+        _buildPerfPanel(isIsolated, hasWebGPU, threads, label, tierColor);
+
+        if (window.VNOCR_DEBUG) console.debug(`[PERF-SYNC] ${icon} | ${label}`);
     } catch (err) {
-        console.warn("[PERF-SYNC-ERROR] Failed to update diagnostics:", err);
+        console.warn('[PERF-SYNC-ERROR]', err);
+        if (perfIcon) perfIcon.textContent = '❓';
     }
+}
+
+function _buildPerfPanel(isIsolated, hasWebGPU, threads, label, tierColor) {
+    if (!perfInfo) return;
+
+    const mem = getMemoryStats();
+    const memRow = mem
+        ? `<div class="pd-row"><span class="pd-key">Heap (JS)</span><span class="pd-val">${mem.used} / ${mem.limit} MB</span></div>`
+        : '';
+
+    // Safe: all values are booleans, numbers, or pre-vetted strings — no user input
+    perfInfo.innerHTML = `
+        <div class="pd-header" style="color:${tierColor}; font-weight:800; margin-bottom:10px; font-size:13px;">
+            ${label}
+        </div>
+        <div class="pd-row"><span class="pd-key">Cross-Origin Isolated</span>
+            <span class="pd-val" style="color:${isIsolated ? '#34d399' : '#f87171'}">${isIsolated ? '✅ Active' : '❌ Disabled'}</span></div>
+        <div class="pd-row"><span class="pd-key">WebGPU</span>
+            <span class="pd-val" style="color:${hasWebGPU ? '#34d399' : '#f87171'}">${hasWebGPU ? '✅ Supported' : '❌ Not available'}</span></div>
+        <div class="pd-row"><span class="pd-key">WASM Threads</span>
+            <span class="pd-val">${threads} core${threads !== 1 ? 's' : ''} ${isIsolated ? '(active)' : '(capped at 1)'}</span></div>
+        ${memRow}
+        <div class="pd-footer">Click icon to close</div>
+    `;
+}
+
+function togglePerfPanel() {
+    if (!perfInfo) return;
+    const isOpen = perfInfo.style.display !== 'none';
+    if (isOpen) {
+        perfInfo.style.display = 'none';
+        return;
+    }
+    // Refresh memory on every open since it changes at runtime
+    if (_perfCache) {
+        _buildPerfPanel(
+            _perfCache.isIsolated, _perfCache.hasWebGPU, _perfCache.threads,
+            perfIcon?.title?.split(' — ')[0] || '',
+            _perfCache.isIsolated && _perfCache.hasWebGPU ? '#34d399'
+                : _perfCache.isIsolated ? '#fbbf24' : '#a1a1aa'
+        );
+    }
+    perfInfo.style.display = 'block';
 }
 
 async function globalInitialize() {
@@ -2899,7 +2953,30 @@ function initEventListeners() {
     if (menuBtn) menuBtn.onclick = openMenu;
     if (menuBackdrop) menuBackdrop.onclick = (e) => { e.stopPropagation(); closeMenu(); };
 
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    // Performance Icon: click to toggle diagnostic panel
+    if (perfIcon) {
+        perfIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePerfPanel();
+        });
+    }
+
+    // Global dismiss: Escape closes both side menu AND perf panel
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeMenu();
+            if (perfInfo) perfInfo.style.display = 'none';
+        }
+    });
+
+    // Outside-click closes perf panel (mirrors sidebar backdrop pattern)
+    document.addEventListener('click', (e) => {
+        if (perfInfo && perfInfo.style.display !== 'none') {
+            if (!perfInfo.contains(e.target) && e.target !== perfIcon) {
+                perfInfo.style.display = 'none';
+            }
+        }
+    });
 
     if (menuInstall) menuInstall.onclick = () => {
         document.getElementById('install-btn')?.click();

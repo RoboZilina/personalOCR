@@ -299,9 +299,41 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
     border-color: rgba(248, 113, 113, 0.4);
     box-shadow: 0 0 15px rgba(248, 113, 113, 0.1);
 }
+
+/* Downloading: blue-ish, shows deterministic --progress fill */
+.status-pill.downloading {
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.5);
+    box-shadow: 0 0 15px rgba(96, 165, 250, 0.12);
+}
+.status-pill.downloading::before {
+    background: rgba(96, 165, 250, 0.2);
+    /* No animation — width is driven by --progress for a deterministic fill bar */
+}
+
+/* Warming-up: amber, shows --progress fill */
+.status-pill.warming-up {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.4);
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.1);
+}
+.status-pill.warming-up::before {
+    background: rgba(251, 191, 36, 0.15);
+}
+
+/* Loading / Preloading: indeterminate shimmer (no --progress known) */
 .status-pill.loading::before, .status-pill.preloading::before {
-    background: rgba(248, 113, 113, 0.15);
-    animation: shimmer 2s infinite linear;
+    /* Indeterminate: fill the full bar with an animated shimmer instead of a
+       growing width. Use a gradient so the shimmer sweeps across a solid fill. */
+    width: 100%;
+    background: linear-gradient(
+        90deg,
+        rgba(248, 113, 113, 0.08) 0%,
+        rgba(248, 113, 113, 0.22) 40%,
+        rgba(248, 113, 113, 0.08) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer-sweep 1.6s infinite linear;
 }
 
 .status-pill.ready { 
@@ -325,6 +357,12 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
 }
 
 /* Premium Animations */
+@keyframes shimmer-sweep {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Legacy shimmer kept for any other consumers */
 @keyframes shimmer {
     0% { transform: translateX(-100%); }
     100% { transform: translateX(100%); }

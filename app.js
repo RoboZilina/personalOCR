@@ -491,19 +491,24 @@ const EngineManager = (() => {
         }
         switchingLock = true;
 
-        // Track target ID separately until load succeeds
-        const targetEngineId = id;
+        const previousEngineId = currentEngineId;
 
         try {
+            // Advance currentEngineId BEFORE the load begins.
+            // The isSilent reporter guard in getOrLoadEngine() checks (id === currentEngineId).
+            // If we set this only after the await, every download progress tick is silently
+            // dropped because the engine appears to be a background preload. Setting it here
+            // makes all progress (0% → 100%) flow through to the status pill in real time.
+            currentEngineId = id;
+
             const meta = engineMetadata.get(id);
             if (!meta || meta.state !== 'ready') {
-                notifyStatus('loading', 'Loading…', null, targetEngineId);
+                notifyStatus('loading', 'Loading…', 0, id);
             }
 
             const instance = await getOrLoadEngine(id);
-            
-            // Atomic update: only set current IDs after successful load
-            currentEngineId = targetEngineId;
+
+            // Load succeeded — finalize engine state
             currentEngine = instance;
 
             // Update Metadata for Pipeline compatibility
@@ -512,16 +517,18 @@ const EngineManager = (() => {
                 supportsMultiPass: registryEntry.supportsMultiPass || false,
                 isMultiLine: registryEntry.isMultiLine || false
             };
-            currentInfo = { id: targetEngineId, capabilities: currentCapabilities };
+            currentInfo = { id, capabilities: currentCapabilities };
 
             isReady = true;
-            notifyStatus('ready', 'Ready', null, targetEngineId);
+            notifyStatus('ready', 'Ready', null, id);
             return currentEngine;
         } catch (err) {
+            // Roll back to previous engine on failure so the UI doesn’t get stuck
+            // pointing at an engine that never loaded.
+            currentEngineId = previousEngineId;
             isReady = false;
-            // Report original error message for clarity
             const errorMsg = err?.message || 'Unknown error';
-            notifyStatus(STATUS.ERROR, `🔴 Load Failed: ${errorMsg}`, null, targetEngineId);
+            notifyStatus(STATUS.ERROR, `🔴 Load Failed: ${errorMsg}`, null, id);
             throw err;
         } finally {
             switchingLock = false;

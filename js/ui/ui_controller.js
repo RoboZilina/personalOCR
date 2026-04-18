@@ -104,14 +104,16 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
  * Shows the engine cleanup banner.
  */
 function showEngineCleanupBanner() {
-    document.getElementById('engineCleanupBanner').classList.remove('hidden');
+    const banner = document.getElementById('engineCleanupBanner');
+    if (banner) banner.classList.remove('hidden');
 }
 
 /**
  * Hides the engine cleanup banner.
  */
 function hideEngineCleanupBanner() {
-    document.getElementById('engineCleanupBanner').classList.add('hidden');
+    const banner = document.getElementById('engineCleanupBanner');
+    if (banner) banner.classList.add('hidden');
 }
 
 export { updateCaptureButtonState, setOCRStatus, showEngineCleanupBanner, hideEngineCleanupBanner };

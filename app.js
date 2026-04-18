@@ -2098,24 +2098,39 @@ function initEventListeners() {
     };
 
     // Engine Cleanup Banner Buttons
-    document.getElementById('purgePaddleBtn')?.addEventListener('click', async () => {
-        const wasActive = EngineManager.getInfo?.()?.id === 'paddle';
-        EngineManager.disposeEngine?.('paddle');
-        hideEngineCleanupBanner();
-        // Option A: if active engine was purged, drop safely to tesseract
-        if (wasActive) switchEngineModular('tesseract');
-    });
+    const purgePaddleBtn = document.getElementById('purgePaddleBtn');
+    const purgeMangaBtn = document.getElementById('purgeMangaBtn');
+    const dismissCleanupBanner = document.getElementById('dismissCleanupBanner');
     
-    document.getElementById('purgeMangaBtn')?.addEventListener('click', async () => {
-        const wasActive = EngineManager.getInfo?.()?.id === 'manga';
-        EngineManager.disposeEngine?.('manga');
-        hideEngineCleanupBanner();
-        if (wasActive) switchEngineModular('tesseract');
-    });
+    if (purgePaddleBtn) {
+        purgePaddleBtn.addEventListener('click', async () => {
+            const wasActive = EngineManager.getInfo?.()?.id === 'paddle';
+            EngineManager.disposeEngine?.('paddle');
+            hideEngineCleanupBanner();
+            if (wasActive) switchEngineModular('tesseract');
+        });
+    } else {
+        console.warn('[INIT] purgePaddleBtn not found');
+    }
     
-    document.getElementById('dismissCleanupBanner')?.addEventListener('click', () => {
-        hideEngineCleanupBanner();
-    });
+    if (purgeMangaBtn) {
+        purgeMangaBtn.addEventListener('click', async () => {
+            const wasActive = EngineManager.getInfo?.()?.id === 'manga';
+            EngineManager.disposeEngine?.('manga');
+            hideEngineCleanupBanner();
+            if (wasActive) switchEngineModular('tesseract');
+        });
+    } else {
+        console.warn('[INIT] purgeMangaBtn not found');
+    }
+    
+    if (dismissCleanupBanner) {
+        dismissCleanupBanner.addEventListener('click', () => {
+            hideEngineCleanupBanner();
+        });
+    } else {
+        console.warn('[INIT] dismissCleanupBanner not found');
+    }
 
     // 6. Sub-Menu Quick Settings
     const subItemBtns = document.querySelectorAll('.menu-subitem-btn');

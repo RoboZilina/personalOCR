@@ -86,6 +86,9 @@ import {
 } from './settings.js';
 
 import { STATUS } from './js/core/status.js?v=3.8.4';
+import { EngineManager } from './js/core/engine_manager.js?v=3.8.4';
+import { captureFrame, preprocessForEngine, pickBestMultiPassResult, weightedScore, findBestMultiPassIndex } from './js/core/capture_pipeline.js?v=3.8.4';
+import { updateCaptureButtonState, setOCRStatus, showEngineCleanupBanner, hideEngineCleanupBanner } from './js/ui/ui_controller.js?v=3.8.4';
 
 import {
     runPaddleOCR
@@ -153,6 +156,11 @@ let captureLocked = false;
 let engineReady = false;
 let isProcessing = false; // Unified state tracking for OCR cycles
 
+// Expose state variables on window for UI controller module
+window.captureLocked = captureLocked;
+window.engineReady = engineReady;
+window.isProcessing = isProcessing;
+
 // 0. Emergency Safety Boundary: Register immediately at module load (Refined v3.8)
 startSplashHintRotation();
 
@@ -167,14 +175,6 @@ setTimeout(() => {
     }
     // If dismissed==true, already removed — do nothing
 }, 30000);
-
-function updateCaptureButtonState() {
-    if (!refreshOcrBtn) return;
-    // Heartbed Sync: Factor in engine readiness, button lock, AND active processing
-    const shouldBeDisabled = !engineReady || captureLocked || isProcessing;
-    refreshOcrBtn.disabled = shouldBeDisabled;
-    refreshOcrBtn.classList.toggle('disabled', shouldBeDisabled);
-}
 
 // Hook into EngineManager Lifecycle
 // Bridge Phase: EngineManager observers relocated to globalInitialize footer for Gold v3.1 stability
@@ -240,557 +240,17 @@ const engines = {
     }
 };
 
+// Expose engines registry to EngineManager module
+window.VNOCR_ENGINES = engines;
+
 // ============================
-// EngineManager (Singleton)
-// Central source of truth for engine lifecycle and identity.
+// EngineManager imported from js/core/engine_manager.js
 // ============================
 
 /* eslint-disable no-unused-expressions */
-const EngineManager = (() => {
 
-    // Internal State Machine (Gold v3.8 Compliance)
-    const engineMetadata = new Map(); // id -> { instance, state, loadPromise }
-
-    // Memory guard: evict heavy engines when switching
-    function evictOtherEngines(activeId) {
-        const KEEP_CACHED = new Set(['paddle', 'tesseract']); // engines allowed to stay in memory
-
-        for (const [id, meta] of engineMetadata.entries()) {
-            if (id === activeId) continue;          // never evict active engine
-            if (KEEP_CACHED.has(id)) continue;      // keep paddle/tesseract cached
-
-            if (meta.instance) {
-                try {
-                    meta.instance.dispose?.();
-                } catch (e) {
-                    console.warn(`[ENGINE] dispose failed for ${id}`, e);
-                }
-            }
-
-            engineMetadata.delete(id);
-        }
-    }
-
-    let currentEngineId = 'tesseract'; // Default starting point
-    let currentEngine = null;
-    let switchingLock = false;
-    let currentCapabilities = {};
-    let currentInfo = { id: 'tesseract', capabilities: {} };
-
-    // Fixed Labels for Status Formatting
-    const ENGINE_LABELS = {
-        'tesseract': 'Tesseract',
-        'paddle': 'PaddleOCR',
-        'manga': 'MangaOCR'
-    };
-
-    // Status listeners (UI will subscribe later)
-    const statusListeners = new Set();
-    const listeners = { ready: [], loading: [], error: [] };
-    let isReady = false;
-
-    // Subscribe to status updates
-    function onStatusChange(listener) {
-        statusListeners.add(listener);
-        return () => statusListeners.delete(listener);
-    }
-
-    // Subscribe to specific events
-    function onReady(fn) { listeners.ready.push(fn); return () => { listeners.ready = listeners.ready.filter(f => f !== fn); }; }
-    function onLoading(fn) { listeners.loading.push(fn); return () => { listeners.loading = listeners.loading.filter(f => f !== fn); }; }
-    function onError(fn) { listeners.error.push(fn); return () => { listeners.error = listeners.error.filter(f => f !== fn); }; }
-
-    function emit(type, payload) {
-        if (listeners[type]) {
-            listeners[type].forEach(fn => fn(payload));
-        }
-    }
-
-    /**
-     * Unified Status Broadcaster
-     * Formats outgoing text as "[Engine] — [Status]"
-     */
-    function notifyStatus(state, text, progress = null, targetId = null) {
-        const id = targetId || currentEngineId;
-        const label = ENGINE_LABELS[id] || id;
-
-        // Guard: ensure text is a string
-        const safeText = String(text || '');
-
-        // Format logic: Only prepend engine name if it's not already there
-        const statusText = safeText.includes('—') ? safeText : `${label} — ${safeText}`;
-
-        if (state === STATUS.READY) emit('ready', statusText);
-        if (state === STATUS.LOADING || state === STATUS.DOWNLOADING || state === STATUS.WARMING) emit('loading', statusText);
-        if (state === STATUS.ERROR) emit('error', statusText);
-
-        for (const fn of statusListeners) {
-            try { fn({ state, text: statusText, progress, engineId: id }); } catch { }
-        }
-    }
-
-    /**
-     * State-Aware Engine Loader
-     * Implements promise deduplication and background readiness.
-     */
-    async function getOrLoadEngine(id, isSilent = false) {
-        // Bug #9 fix: gate stack trace behind debug flag (was unconditional console.trace)
-        if (window.VNOCR_DEBUG) console.trace(`[ENGINE] getOrLoadEngine(${id})`);
-
-        let meta = engineMetadata.get(id);
-
-        if (!meta) {
-            meta = { instance: null, state: 'not_loaded', loadPromise: null };
-            engineMetadata.set(id, meta);
-        }
-
-        // 1. Cache/Deduplication Hit
-        if (meta.state === 'ready') return meta.instance;
-        if (meta.state === 'loading') return meta.loadPromise;
-
-        // 2. Start Loading Lifecycle (all engines load on the main thread)
-        // ONNX InferenceSession objects are not transferable across Worker boundaries,
-        // so a Worker-based preload cannot hand off a live session to the main thread.
-        // All engines load via cooperative async scheduling. Tesseract always anchors
-        // interactivity first; Paddle/Manga preload silently in the background.
-        meta.state = 'loading';
-        const loadStartTime = performance.now();
-
-        // ATOMIC FIX: Create and assign promise synchronously BEFORE any await
-        // This ensures concurrent callers see the loadPromise immediately
-        const loadPromise = (async () => {
-            try {
-                const registryEntry = engines[id];
-                if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
-
-                const reporter = (state, text, progress) => {
-                    // Update internal state tracking
-                    if (state === STATUS.READY) meta.state = 'ready';
-                    
-                    // Broadcast to UI if active or forced, or if state is ERROR, or if debug flag is set
-                    if (!isSilent || id === currentEngineId || state === STATUS.ERROR || window.VNOCR_DEBUG) {
-                        notifyStatus(state, text, progress, id);
-                    }
-                };
-
-                const instance = registryEntry.factory({ reportStatus: reporter });
-                
-                if (instance && typeof instance.load === 'function') {
-                    await instance.load();
-                }
-
-                await _warmUpEngine(instance, id);
-
-                meta.instance = instance;
-                meta.state = 'ready';
-                
-                // Observability: log successful load completion (gated by VNOCR_DEBUG)
-                const loadDuration = Math.round(performance.now() - loadStartTime);
-                if (window.VNOCR_DEBUG) {
-                    console.debug(`[ENGINE-METRIC] ${id} loaded successfully in ${loadDuration}ms (silent: ${isSilent})`);
-                }
-                // Telemetry hook for opt-in collection
-                if (window.VNOCR_TELEMETRY && typeof window.VNOCR_TELEMETRY === 'function') {
-                    window.VNOCR_TELEMETRY({ type: 'engine_loaded', engineId: id, duration: loadDuration, silent: isSilent });
-                }
-                
-                return instance;
-            } catch (err) {
-                meta.state = 'error';
-                meta._lastError = err?.message; // Capture for finally block
-                throw err;
-            } finally {
-                meta.loadPromise = null; // Always clear promise in both success and error paths
-
-                // Observability: log error transition with timing (gated by VNOCR_DEBUG)
-                // Note: Only log if we came from catch (meta.state === 'error')
-                if (meta.state === 'error' && meta._lastError) {
-                    const loadDuration = Math.round(performance.now() - loadStartTime);
-                    const errorMsg = meta._lastError;
-                    if (window.VNOCR_DEBUG) {
-                        console.warn(`[ENGINE-METRIC] ${id} failed after ${loadDuration}ms:`, errorMsg);
-                    }
-                    if (window.VNOCR_TELEMETRY && typeof window.VNOCR_TELEMETRY === 'function') {
-                        window.VNOCR_TELEMETRY({ type: 'engine_error', engineId: id, duration: loadDuration, error: errorMsg });
-                    }
-                    meta._lastError = null; // Clean up
-                }
-            }
-        })();
-
-        // ATOMIC FIX: Assign immediately so concurrent callers see it
-        meta.loadPromise = loadPromise;
-
-        return loadPromise;
-    }
-
-    /**
-     * Main thread loading fallback for heavy engines when worker fails.
-     */
-    async function loadEngineMainThread(id, isSilent = false) {
-        let meta = engineMetadata.get(id);
-        if (!meta) {
-            meta = { instance: null, state: 'not_loaded', loadPromise: null };
-            engineMetadata.set(id, meta);
-        }
-
-        meta.state = 'loading';
-
-        try {
-            const registryEntry = engines[id];
-            if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
-
-            const reporter = (state, text, progress) => {
-                if (state === STATUS.READY) meta.state = 'ready';
-                if (!isSilent || id === currentEngineId || state === STATUS.ERROR || window.VNOCR_DEBUG) {
-                    notifyStatus(state, text, progress, id);
-                }
-            };
-
-            const instance = registryEntry.factory({ reportStatus: reporter });
-
-            if (instance && typeof instance.load === 'function') {
-                await instance.load();
-            }
-
-            await _warmUpEngine(instance, id);
-
-            meta.instance = instance;
-            meta.state = 'ready';
-
-            return instance;
-        } catch (err) {
-            meta.state = 'error';
-            throw err;
-        }
-    }
-
-    async function _warmUpEngine(engine, id) {
-        if (engine._warmedUp) return;
-        try {
-            if (engine && typeof engine.warmUp === 'function') {
-                if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Warming up ${id.toUpperCase()}...`);
-                await engine.warmUp();
-            }
-            engine._warmedUp = true;
-        } catch (err) {
-            console.warn(`[ENGINE] Warm-up failed for ${id}:`, err);
-        }
-    }
-
-    /**
-     * High-level switch with persistence and locking.
-     * Atomic update: only sets currentEngineId after successful load.
-     */
-    async function switchEngine(registryEntry) {
-        const id = registryEntry.id;
-
-        if (switchingLock) {
-            if (window.VNOCR_DEBUG) console.warn("[TRACE] Ignored overlapping engine switch");
-            return;
-        }
-        switchingLock = true;
-
-        const previousEngineId = currentEngineId;
-
-        try {
-            // Advance currentEngineId BEFORE the load begins.
-            // The isSilent reporter guard in getOrLoadEngine() checks (id === currentEngineId).
-            // If we set this only after the await, every download progress tick is silently
-            // dropped because the engine appears to be a background preload. Setting it here
-            // makes all progress (0% → 100%) flow through to the status pill in real time.
-            currentEngineId = id;
-
-            const meta = engineMetadata.get(id);
-            if (!meta || meta.state !== 'ready') {
-                notifyStatus('loading', 'Loading…', 0, id);
-            }
-
-            const instance = await getOrLoadEngine(id);
-
-            // Load succeeded — finalize engine state
-            currentEngine = instance;
-
-            // Update Metadata for Pipeline compatibility
-            currentCapabilities = {
-                supportsModes: registryEntry.supportsModes || false,
-                supportsMultiPass: registryEntry.supportsMultiPass || false,
-                isMultiLine: registryEntry.isMultiLine || false
-            };
-            currentInfo = { id, capabilities: currentCapabilities };
-
-            isReady = true;
-            notifyStatus('ready', 'Ready', null, id);
-            return currentEngine;
-        } catch (err) {
-            // Roll back to previous engine on failure so the UI doesn’t get stuck
-            // pointing at an engine that never loaded.
-            currentEngineId = previousEngineId;
-            isReady = false;
-            const errorMsg = err?.message || 'Unknown error';
-            notifyStatus(STATUS.ERROR, `🔴 Load Failed: ${errorMsg}`, null, id);
-            throw err;
-        } finally {
-            switchingLock = false;
-        }
-    }
-
-    /**
-     * Load engine in Web Worker.
-     * Spawns worker, listens for postMessage, resolves with payload.
-     */
-    async function loadEngineInWorker(id) {
-        const workerPath = id === 'paddle'
-            ? '/js/paddle/paddle_preload_worker.js?v=3.8.4'
-            : '/js/manga/manga_preload_worker.js?v=3.8.4';
-
-        return new Promise((resolve, reject) => {
-            const worker = new Worker(workerPath, { type: 'module' });
-
-            worker.onmessage = (e) => {
-                const { type, payload, error } = e.data;
-                if (type === 'ready') {
-                    worker.terminate();
-                    resolve(payload);
-                } else if (type === 'error') {
-                    worker.terminate();
-                    reject(new Error(error));
-                }
-            };
-
-            worker.onerror = (err) => {
-                worker.terminate();
-                reject(err);
-            };
-
-            worker.postMessage({ command: 'load', id });
-        });
-    }
-
-    /**
-     * Rehydrate engine from worker payload.
-     * Constructs instance, applies payload, returns ready instance.
-     */
-    async function rehydrateEngine(id, payload) {
-        const registryEntry = engines[id];
-        if (!registryEntry) throw new Error(`Unknown engine: ${id}`);
-
-        const reporter = (state, text, progress) => {
-            notifyStatus(state, text, progress, id);
-        };
-
-        const instance = registryEntry.factory({ reportStatus: reporter });
-
-        if (instance.rehydrate && typeof instance.rehydrate === 'function') {
-            await instance.rehydrate(payload);
-        } else {
-            if (typeof instance.load === 'function') await instance.load();
-            if (typeof instance.warmUp === 'function') await instance.warmUp();
-        }
-
-        return instance;
-    }
-
-    /**
-     * Silent background pre-warming of the Paddle engine.
-     *
-     * Strategy:
-     *   - Spawns the existing paddle_preload_worker to fetch model files and create
-     *     ONNX sessions entirely inside a Worker context (off the main thread).
-     *   - Main thread is never blocked — no ONNX session creation, no UI freezes.
-     *   - The worker warms the browser and Service Worker cache so that when the
-     *     user later switches to Paddle, only ONNX session creation remains
-     *     (network fetch is a cache hit ≈ instant).
-     *   - Worker result is intentionally discarded: ONNX sessions are not transferable
-     *     across threads. The cache-warmth is the only goal.
-     *
-     * Exclusions:
-     *   - Paddle is the saved/active engine → handled by globalInitialize via
-     *     switchEngineModular (non-silent, locks capture button).
-     *   - MangaOCR is never silently preloaded — only loaded if explicitly selected
-     *     (cost: ~450 MB + 1.2 GB VRAM; user must opt-in).
-     *   - Tesseract is already loaded synchronously at startup (no-op here).
-     */
-    async function preloadCoreEngines() {
-        if (window.VNOCR_DEBUG) console.debug('[ENGINE] Starting Paddle cache-warm via worker...');
-
-        try {
-            // Fire-and-forget: we do not call rehydrateEngine() — we only want
-            // the worker to populate the browser/SW cache, not to store a transferable
-            // engine instance (ONNX sessions are NOT transferable across threads).
-            await loadEngineInWorker('paddle');
-            if (window.VNOCR_DEBUG) console.debug('[ENGINE] Paddle cache-warm complete (worker).');
-        } catch (err) {
-            // Non-critical: first user-initiated Paddle switch will just be a cache-cold load.
-            if (window.VNOCR_DEBUG) console.warn('[ENGINE] Paddle worker cache-warm failed:', err.message);
-        }
-    }
-
-    /**
-     * Disposes a single engine by ID, releasing its ONNX sessions and resetting
-     * its metadata state. Safe to call even if the engine is not loaded.
-     * @param {string} id - Engine ID: 'paddle', 'manga', or 'tesseract'
-     */
-    async function disposeEngine(id) {
-        const meta = engineMetadata.get(id);
-        if (!meta) return;
-
-        const engine = meta.instance;
-        if (engine && typeof engine.dispose === 'function') {
-            try {
-                await engine.dispose();
-                if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Disposed: ${id}`);
-            } catch (err) {
-                console.error(`[ENGINE] dispose failed for ${id}:`, err);
-            }
-        }
-
-        engineMetadata.set(id, { instance: null, state: 'not_loaded', loadPromise: null });
-
-        // If we disposed the currently active engine, clear the active state.
-        if (currentEngineId === id) {
-            currentEngine = null;
-            currentEngineId = null;
-            isReady = false;
-            notifyStatus('idle', 'Engine unloaded');
-        }
-    }
-
-    async function disposeAllEngines() {
-        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Purging engine cache...");
-        await Promise.allSettled(
-            Array.from(engineMetadata.entries()).map(async ([id, meta]) => {
-                const engine = meta?.instance;
-                if (engine && typeof engine.dispose === 'function') {
-                    try {
-                        await engine.dispose();
-                        if (window.VNOCR_DEBUG) console.debug(`[TRACE] Engine Disposed: ${id}`);
-                    } catch (err) {
-                        console.error(`Engine dispose error (${id}):`, err);
-                    }
-                }
-                engineMetadata.set(id, { instance: null, state: 'not_loaded', loadPromise: null });
-            })
-        );
-        currentEngine = null;
-        currentEngineId = null;
-        currentInfo = { id: null, capabilities: {} };
-        isReady = false;
-        notifyStatus('idle', 'All engines cleared');
-    }
-
-    // Unified OCR entry point
-    async function runOCR(canvas, options = {}) {
-        // Gold v3.8: Support instance pinning for multi-slice stability
-        let engine = currentEngine;
-        let engineId = currentEngineId || 'tesseract';
-        
-        // If options contains engineInstance (internal pin), use it directly
-        if (options && options.engineInstance) {
-            engine = options.engineInstance;
-        }
-        
-        // If options contains explicit engineId, use that for loading
-        if (options && typeof options.engineId === 'string') {
-            engineId = options.engineId;
-        }
-
-        // Auto-recovery: if no engine loaded, try to load the target engine
-        if (!engine || typeof engine.recognize !== 'function') {
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] runOCR: Engine not ready, attempting auto-load for ${engineId}`);
-            try {
-                // Check if switching is in progress to avoid race conditions
-                if (switchingLock) {
-                    throw new Error('Engine switch in progress - please retry');
-                }
-                engine = await getOrLoadEngine(engineId);
-                // Update current engine if we're loading the current one
-                if (engineId === currentEngineId) {
-                    currentEngine = engine;
-                }
-            } catch (loadErr) {
-                console.error(`[ENGINE] Auto-load failed for ${engineId}:`, loadErr);
-                notifyStatus(STATUS.ERROR, `Load failed: ${loadErr.message}`, null, engineId);
-                throw new Error(`Engine load failed: ${loadErr.message}`);
-            }
-        }
-
-        if (!engine || typeof engine.recognize !== 'function') {
-            notifyStatus(STATUS.ERROR, 'No engine available', null, engineId);
-            throw new Error('No engine available');
-        }
-
-        try {
-            notifyStatus(STATUS.PROCESSING, '🟡 Processing...', null, engineId);
-            const result = await engine.recognize(canvas, (typeof options === 'object' ? options : {}));
-            return result;
-        } catch (err) {
-            notifyStatus(STATUS.ERROR, 'OCR failed', null, engineId);
-            throw err;
-        }
-    }
-
-
-
-    // Unified preprocessing entry point
-    async function preprocess(canvas, mode, lineCount) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.preprocess === 'function') {
-            return await entry.preprocess(canvas, mode, lineCount);
-        }
-        return [canvas];
-    }
-
-    // Unified post-processing entry point
-    function postprocess(results) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.postprocess === 'function') {
-            return entry.postprocess(results);
-        }
-        return results.join(' ').trim();
-    }
-
-    function getReadyStatus() {
-        const id = currentEngineId || 'tesseract';
-        const entry = engines[id];
-        return entry?.readyStatus || '🟢 OCR Ready';
-    }
-
-    function handleError(error) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.handleError === 'function') {
-            return entry.handleError(error);
-        }
-        console.error("Unhandleable error:", error);
-        return "[OCR Error]";
-    }
-
-    // Initialize Defaults
-    engineMetadata.set('tesseract', { instance: null, state: 'idle', loadPromise: null });
-
-    return {
-        onReady, onLoading, onError, onStatusChange,
-        switchEngine, preloadCoreEngines, disposeAllEngines, disposeEngine,
-        getOrLoadEngine, evictOtherEngines, loadEngineInWorker, rehydrateEngine, loadEngineMainThread,
-        runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
-        isReady: () => isReady,
-        getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
-        getInfo: () => currentInfo || { id: null, capabilities: {} },
-        getEngineInstance: () => currentEngine,
-        getReadyStatus,
-        emitError: (err) => emit('error', err),
-        handleError: (err) => {
-            console.error("[ENGINE-ERROR]", err);
-            return "🔴 OCR ERROR";
-        }
-    };
-
-})();
-
-// Temporary global bridge
+// EngineManager is imported from js/core/engine_manager.js
+// Temporary global bridge for backwards compatibility
 window.EngineManager = EngineManager;
 
 
@@ -945,85 +405,6 @@ loadVoices();
 // Step 2: Wire EngineManager (passive listener)
 // Gold v3.1.1: Relocated EngineManager.onStatusChange to globalInitialize footer to ensure deterministic hydration.
 
-// Progress Pill v2: Unified State Machine (Gold v3.8)
-let statusSettleTimer = null;
-let statusTransitionLock = false;
-
-/**
- * High-fidelity status management for the Progress Pill v2.
- * @param {string} state - The status category (ready, processing, loading, etc.)
- * @param {string} text - The display string.
- * @param {number|null} progress - 0.0 to 1.0 or null.
- * @param {string|null} sourceId - The engine ID that sent this update.
- */
-function setOCRStatus(state, text, progress = null, sourceId = null) {
-    // 1. Internal EngineManager Sync
-    if (window.EngineManager && typeof EngineManager._notifyStatus === 'function') {
-        EngineManager._notifyStatus(state, text, progress);
-    }
-
-    const ocrStatus = document.getElementById('ocr-status');
-    const statusLabel = document.getElementById('status-text');
-    if (!ocrStatus || !statusLabel) return;
-
-    // 2. Silent Preload Guard
-    // If update is from an engine that isn't the current target, discard unless it's an error or READY.
-    // Allow READY from background engines so UI can reflect successful preloads.
-    // Only filter if sourceId is explicitly provided (defined) and different from activeId.
-    // Guard against uninitialized EngineManager or null getInfo() during early init.
-    const activeInfo = (typeof EngineManager !== 'undefined' && EngineManager.getInfo) ? EngineManager.getInfo() : {};
-    const activeId = activeInfo?.id || null;
-    
-    // Filter only LOADING/PROCESSING/DOWNLOADING from non-active engines
-    // Allow ERROR (always show errors) and READY (show successful preloads)
-    const isNoisyProgressState = [STATUS.LOADING, STATUS.DOWNLOADING, STATUS.WARMING, STATUS.PROCESSING].includes(state);
-    if (typeof sourceId === 'string' && sourceId !== activeId && isNoisyProgressState) {
-        if (getSetting('debug')) console.debug(`[STATUS-DEBUG] Filtering silent preload progress from ${sourceId} (active: ${activeId}, state: ${state})`);
-        return;
-    }
-
-    // 3. Settle Logic: Prevent rapid-fire READY flickers
-    if (state === STATUS.READY) {
-        if (statusSettleTimer) return; // Wait for the existing timer
-        statusSettleTimer = setTimeout(() => {
-            applyStatusStage(STATUS.READY, text || EngineManager.getReadyStatus(), null);
-            statusSettleTimer = null;
-        }, 120); // 120ms "Settle" window for absolute stability
-        return;
-    }
-
-    // If a non-ready status (processing/error) comes in, cancel any pending readiness
-    if (statusSettleTimer) {
-        clearTimeout(statusSettleTimer);
-        statusSettleTimer = null;
-    }
-
-    applyStatusStage(state, text, progress);
-
-    function applyStatusStage(s, t, p) {
-        const cssClass = String(s).toLowerCase();
-        ocrStatus.className = `status-pill ${cssClass}`;
-
-        // Progress Normalization
-        if (p === null || s === STATUS.READY || s === STATUS.ERROR) {
-            ocrStatus.style.removeProperty('--progress');
-        } else {
-            const pct = Math.round(p * 100);
-            ocrStatus.style.setProperty('--progress', `${pct}%`);
-            if (t && !t.includes('%') && !t.includes('/')) t = `${t} (${pct}%)`;
-        }
-
-        // Text Transition (Fading)
-        if (statusLabel.textContent !== t) {
-            statusLabel.classList.add('fading');
-            setTimeout(() => {
-                statusLabel.textContent = t;
-                statusLabel.classList.remove('fading');
-            }, 100); // Wait for fade-out, update, then fade-in via CSS
-        }
-    }
-}
-
 async function initOCR() {
     // Since #model-selector now handles engines, we default Tesseract to 'jpn_best'
 }
@@ -1115,52 +496,6 @@ function applyPaddlePreprocessing(cropCanvas, lineCount) {
         return t3;
     });
 }
-
-/**
- * Unified preprocessing entry point. Delegates to the active engine's preprocess function.
- * @param {string} engineId - Active engine ID (used for trace logging only)
- * @param {HTMLCanvasElement} rawCanvas - The original crop
- * @param {string} mode - Preprocessing mode (adaptive, multi, etc.)
- * @param {number} lineCount - Number of lines (for Paddle)
- * @returns {HTMLCanvasElement[]} Array of one or more preprocessed canvases.
- */
-async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
-    console.log('[TRACE] preprocessForEngine called with engineId =', engineId);
-    
-    // Look up explicit engine instance by ID if available
-    let engineToUse = EngineManager.getEngineInstance();
-    if (engineId && typeof EngineManager.getEngineMetadata === 'function') {
-        const meta = EngineManager.getEngineMetadata(engineId);
-        if (meta && meta.instance) engineToUse = meta.instance;
-    }
-    
-    if (engineToUse && typeof engineToUse.preprocess === 'function') {
-        try {
-            return await engineToUse.preprocess(rawCanvas, mode, lineCount);
-        } catch (err) {
-            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Instance preprocess failed, trying registry fallback:", err);
-        }
-    }
-    
-    // Fallback 1: Try registry entry preprocess
-    const entry = engines[engineId];
-    if (entry && typeof entry.preprocess === 'function') {
-        try {
-            return await entry.preprocess(rawCanvas, mode, lineCount);
-        } catch (err) {
-            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Registry preprocess failed, using raw canvas fallback:", err);
-        }
-    }
-    
-    // Final Fallback: Clone raw canvas to prevent pipeline from destroying original
-    if (window.VNOCR_DEBUG) console.debug("[ENGINE] No preprocess available, returning cloned canvas");
-    const cloned = document.createElement('canvas');
-    cloned.width = rawCanvas.width;
-    cloned.height = rawCanvas.height;
-    cloned.getContext('2d').drawImage(rawCanvas, 0, 0);
-    return [cloned];
-}
-
 
 if (typeof modeSelector !== 'undefined' && modeSelector) {
     modeSelector.addEventListener('change', () => {
@@ -1282,13 +617,6 @@ function unfreezeCaptureButton() {
         captureButton.disabled = false;
         captureButton.classList.remove('disabled');
     }
-}
-
-function showEngineCleanupBanner() {
-    document.getElementById('engineCleanupBanner').classList.remove('hidden');
-}
-function hideEngineCleanupBanner() {
-    document.getElementById('engineCleanupBanner').classList.add('hidden');
 }
 
 function checkAndShowCleanupBanner() {
@@ -1644,223 +972,6 @@ function boostContrast(canvas, factor = 1.08) {
     return out;
 }
 
-async function captureFrame(rect = null) {
-    // Hardening v3.4: Null-selection guard (Fixes denormalizeSelection TypeError)
-    if (!rect && !window.selectionRect) return;
-
-    // Hardening v3.8: Combined readiness and processing lock
-    if (isProcessing || !EngineManager.isReady()) return;
-    
-    const myGen = ++captureGeneration;
-    let lockReleased = false;
-    
-    // Helper to release lock safely
-    const releaseLock = () => {
-        if (!lockReleased) {
-            isProcessing = false;
-            lockReleased = true;
-        }
-    };
-    
-    isProcessing = true;
-    
-    // Engine Pinning: Lock current instance and ID to ensure consistency throughout the slice cycle
-    const pinnedEngine = EngineManager.getEngineInstance();
-    const pinnedInfo = EngineManager.getInfo() || { id: null, capabilities: {} };
-    const pinnedCaps = pinnedInfo.capabilities || {};
-    const pinnedId = pinnedInfo.id || null;
-    
-    logTrace(`Capture started. Gen: ${myGen} | Engine: ${pinnedId}`);
-
-    const vWidth = vnVideo.videoWidth, vHeight = vnVideo.videoHeight;
-    const sel = denormalizeSelection(rect, vnVideo, selectionOverlay);
-    const cx_ = Math.max(0, Math.floor(sel.x)), cy_ = Math.max(0, Math.floor(sel.y));
-    const cw_ = Math.max(1, Math.min(vWidth - cx_, Math.floor(sel.w))), ch_ = Math.max(1, Math.min(vHeight - cy_, Math.floor(sel.h)));
-
-    const rawCropCanvas = document.createElement('canvas');
-    rawCropCanvas.width = cw_; rawCropCanvas.height = ch_;
-    rawCropCanvas.getContext('2d').drawImage(vnVideo, cx_, cy_, cw_, ch_, 0, 0, cw_, ch_);
-
-    EngineManager._notifyStatus(STATUS.PROCESSING, '🟡 Processing...', null, pinnedId);
-    await new Promise(r => setTimeout(r, 0)); // yield to browser for repaint
-    
-    const mode = modeSelector.value;
-    
-    try {
-        // Tesseract Multi-Pass Branch
-        if (pinnedId === 'tesseract' && mode === 'multi') {
-            const preStart = performance.now();
-            const canvases = applyTesseractPreprocessing(rawCropCanvas, mode);
-            perfStats.preprocess = performance.now() - preStart;
-            const results = [];
-
-            // 1. First Pass: Early exit if result is highly confident and clean
-            const infStart = performance.now();
-            const first = await EngineManager.runOCR(canvases[0], { engineInstance: pinnedEngine });
-            
-            // Generation Check (Critical for preventing UI ghosting)
-            if (captureGeneration !== myGen) {
-                canvases.forEach(c => { c.width = 0; c.height = 0; });
-                releaseLock();
-                return;
-            }
-
-            const firstDensity = scoreJapaneseDensity(first.text);
-            if (first.confidence > 85 && firstDensity > 5) {
-                addOCRResultToUI(first.text);
-                updateDebugThumb(canvases[0]);
-                perfStats.inference = performance.now() - infStart;
-                canvases.forEach(c => { c.width = 0; c.height = 0; });
-                if (window.updatePerformanceStatus) window.updatePerformanceStatus();
-                releaseLock();
-                return;
-            }
-
-            // 2. Otherwise: Continue with the remaining 4 passes for Analyst voting
-            results.push({ text: first.text, confidence: first.confidence });
-            for (let i = 1; i < canvases.length; i++) {
-                setOCRStatus('processing', `Analyst: Pass ${i + 1}/5...`);
-                // Pinning: Pass pinnedEngine to runOCR
-                const r = await EngineManager.runOCR(canvases[i], { engineInstance: pinnedEngine });
-                if (captureGeneration !== myGen) {
-                    canvases.forEach(c => { c.width = 0; c.height = 0; });
-                    releaseLock();
-                    return;
-                }
-                results.push({ text: r.text, confidence: r.confidence });
-            }
-
-            const finalText = pickBestMultiPassResult(results);
-            addOCRResultToUI(finalText);
-            const bestIndex = findBestMultiPassIndex(results);
-            updateDebugThumb(canvases[bestIndex]);
-            showMultiPassOverlay(results, finalText);
-            perfStats.inference = performance.now() - infStart;
-            setOCRStatus('ready', '🟢 Analyst Complete');
-            canvases.forEach(c => { c.width = 0; c.height = 0; });
-            if (window.updatePerformanceStatus) window.updatePerformanceStatus();
-            return;
-        }
-
-        // Generic Pipeline Branch (Paddle / Manga / Tesseract Single)
-        const lineCount = getSetting('paddleLineCount') || 1;
-        const preStart = performance.now();
-        const canvases = await preprocessForEngine(pinnedId, rawCropCanvas, mode, lineCount);
-        perfStats.preprocess = performance.now() - preStart;
-        
-        if (captureGeneration !== myGen) {
-            canvases.forEach(c => { c.width = 0; c.height = 0; });
-            releaseLock();
-            return;
-        }
-
-        const ocrLines = [];
-        let totalConfidence = 0;
-        let confidenceCount = 0;
-        const inferenceResults = [];
-        const infStart = performance.now();
-
-        for (let i = 0; i < canvases.length; i++) {
-            const clean = canvases[i];
-            if (!clean.width || !clean.height) {
-                inferenceResults.push(null);
-                continue;
-            }
-
-            // Debug Thumbnail
-            if (i === 0) {
-                if (pinnedCaps.isMultiLine) updateDebugThumb(rawCropCanvas);
-                else updateDebugThumb(canvases[0]);
-            }
-
-            try {
-                setOCRStatus(STATUS.PROCESSING, `Processing (${i + 1}/${canvases.length})`, (i + 1) / canvases.length);
-                // Pinning: Pass pinnedEngine instance to runOCR
-                const result = await EngineManager.runOCR(clean, { engineInstance: pinnedEngine });
-                if (captureGeneration !== myGen) {
-                    releaseLock();
-                    canvases.forEach(c => { c.width = 0; c.height = 0; });
-                    return;
-                }
-                inferenceResults.push(result);
-            } catch (error) {
-                console.error(`[GEN ${myGen}] [INFERENCE-ERROR] Execution failed for slice:`, i, error);
-                EngineManager.emitError(error);
-                inferenceResults.push({ text: EngineManager.handleError(error), confidence: null });
-            }
-        }
-        perfStats.inference = performance.now() - infStart;
-
-        if (captureGeneration !== myGen) {
-            releaseLock();
-            canvases.forEach(c => { c.width = 0; c.height = 0; });
-            return;
-        }
-
-        inferenceResults.forEach(result => {
-            if (!result) return;
-            const { text, confidence } = result;
-            if (confidence !== null) {
-                totalConfidence += confidence;
-                confidenceCount++;
-            }
-            const cleanText = normalizePaddleText(text);
-            if (cleanText) ocrLines.push(cleanText);
-        });
-
-        if (captureGeneration !== myGen) {
-            releaseLock();
-            canvases.forEach(c => { c.width = 0; c.height = 0; });
-            return;
-        }
-
-        // Post-processing
-        const finalText = EngineManager.postprocess(ocrLines);
-        const avgConfidence = confidenceCount > 0 ? (totalConfidence / confidenceCount) : null;
-
-        if (finalText) {
-            addOCRResultToUI(finalText, avgConfidence);
-            setOCRStatus('ready', '🟢 OCR Complete');
-        } else {
-            setOCRStatus('ready', '⚪ No text detected');
-        }
-        logTrace(`Capture Cycle Complete. Gen: ${myGen}`);
-
-        canvases.forEach(c => {
-            if (c && c !== rawCropCanvas) {
-                c.width = 0; c.height = 0;
-            }
-        });
-    } catch (err) {
-        console.error("Frame-level OCR Error:", err);
-        EngineManager.emitError(err);
-    }
-    finally {
-        if (rawCropCanvas) {
-            rawCropCanvas.width = 0; rawCropCanvas.height = 0;
-        }
-
-        // Always release the lock synchronously to prevent race conditions
-        releaseLock();
-
-        // Small cooldown to prevent rapid-fire re-triggering - UI updates only
-        setTimeout(() => {
-            // Always refresh UI heartbeat after a capture attempt to avoid leaving stale "processing" state.
-            try {
-                if (EngineManager.isReady()) {
-                    const statusText = (captureGeneration === myGen) ? EngineManager.getReadyStatus() : 'Ready';
-                    setOCRStatus(STATUS.READY, statusText);
-                } else {
-                    setOCRStatus(STATUS.IDLE, 'idle');
-                }
-            } catch (e) {
-                console.warn("[CAPTURE] UI update failed:", e);
-            }
-            updateCaptureButtonState();
-        }, 100);
-    }
-}
-
 /** Integral-image local mean adaptive threshold. Returns thresholded ImageData. */
 function adaptiveThreshold(canvas, ctx, res, { windowDivisor, thresholdFactor, preInvert, preDenoise }) {
     if (preInvert) canvas = invertCanvas(canvas);
@@ -2148,40 +1259,6 @@ function scoreJapaneseDensity(text) {
     return jp - ascii * 0.5 - noise;
 }
 
-function pickBestMultiPassResult(results) {
-    // 1. Majority vote
-    const counts = {};
-    for (const r of results) {
-        counts[r.text] = (counts[r.text] || 0) + 1;
-    }
-    const majority = Object.entries(counts).find(([t, c]) => c >= 3);
-    if (majority && majority[1] >= 3) return majority[0];
-
-    // 2. Highest confidence
-    const bestByConf = results.reduce((a, b) =>
-        a.confidence > b.confidence ? a : b
-    );
-
-    // 3. Density fallback
-    const bestByDensity = results.reduce((a, b) =>
-        scoreJapaneseDensity(a.text) > scoreJapaneseDensity(b.text) ? a : b
-    );
-
-    // 4. Weighted score fallback
-    let bestWeighted = results[0];
-    for (const r of results) {
-        if (weightedScore(r) > weightedScore(bestWeighted)) {
-            bestWeighted = r;
-        }
-    }
-    return bestWeighted.text;
-}
-
-function weightedScore(result) {
-    const density = Math.max(0, scoreJapaneseDensity(result.text));
-    return result.confidence * 0.7 + density * 0.3;
-}
-
 function showMultiPassOverlay(results, finalText) {
     // Remove existing overlay if present
     const old = document.getElementById('multipass-overlay');
@@ -2292,19 +1369,6 @@ function showMultiPassOverlay(results, finalText) {
 function removeMultiPassOverlay() {
     const old = document.getElementById('multipass-overlay');
     if (old) old.remove();
-}
-
-function findBestMultiPassIndex(results) {
-    let best = 0;
-    let bestScore = -Infinity;
-    results.forEach((r, i) => {
-        const score = weightedScore(r);
-        if (score > bestScore) {
-            bestScore = score;
-            best = i;
-        }
-    });
-    return best;
 }
 
 // Pipelines
@@ -2717,6 +1781,7 @@ async function globalInitialize() {
     latestText = document.getElementById('latest-text');
     ocrStatus = document.getElementById('ocr-status');
     refreshOcrBtn = document.getElementById('refresh-ocr-btn');
+    window.refreshOcrBtn = refreshOcrBtn; // Expose for UI controller module
     captureButton = refreshOcrBtn; // Alias for freeze/unfreeze functions
     clearHistoryBtn = document.getElementById('clear-history-btn');
     engineSelector = document.getElementById('model-selector');
@@ -2755,11 +1820,13 @@ async function globalInitialize() {
     // engineReady=false and the capture button permanently disabled (Bug #4).
     EngineManager.onReady(() => {
         engineReady = true;
+        window.engineReady = true;
         updateCaptureButtonState();
         checkAndShowCleanupBanner();
     });
     EngineManager.onLoading(() => {
         engineReady = false;
+        window.engineReady = false;
         updateCaptureButtonState();
     });
     EngineManager.onStatusChange(({ state, text, progress, engineId }) => {
@@ -2912,9 +1979,10 @@ function initEventListeners() {
         refreshOcrBtn.onclick = async () => {
             if (captureLocked || isProcessing) return;
             captureLocked = true;
+            window.captureLocked = true;
             updateCaptureButtonState();
             try { await captureFrame(); } finally {
-                setTimeout(() => { captureLocked = false; updateCaptureButtonState(); }, 300);
+                setTimeout(() => { captureLocked = false; window.captureLocked = false; updateCaptureButtonState(); }, 300);
             }
         };
     }

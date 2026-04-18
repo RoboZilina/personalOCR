@@ -623,8 +623,11 @@ function checkAndShowCleanupBanner() {
     const metaP = EngineManager.getEngineMetadata?.('paddle');
     const metaM = EngineManager.getEngineMetadata?.('manga');
 
+    console.log('[BANNER-CHECK] current:', current, 'metaP:', metaP?.state, 'metaM:', metaM?.state);
+
     if ((metaP?.state === 'ready' && current !== 'paddle') ||
         (metaM?.state === 'ready' && current !== 'manga')) {
+        console.log('[BANNER-CHECK] Showing banner');
         showEngineCleanupBanner();
     } else {
         hideEngineCleanupBanner();

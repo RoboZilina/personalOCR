@@ -1278,6 +1278,30 @@ function hideEngineCleanupBanner() {
     document.getElementById('engineCleanupBanner').classList.add('hidden');
 }
 
+function normalizePaddleText(result) {
+    if (!result) return "";
+
+    // If it's already a string
+    if (typeof result === "string") {
+        return result.trim();
+    }
+
+    // If it's an object with a text field
+    if (typeof result === "object" && result.text !== undefined) {
+        return normalizePaddleText(result.text);
+    }
+
+    // If it's an array of strings or objects
+    if (Array.isArray(result)) {
+        return result
+            .map(r => normalizePaddleText(r))
+            .join(" ")
+            .trim();
+    }
+
+    return "";
+}
+
 // Event binding moved to initEventListeners()
 
 function setupSelectionOverlay() {
@@ -1752,7 +1776,8 @@ async function captureFrame(rect = null) {
                 totalConfidence += confidence;
                 confidenceCount++;
             }
-            if (text && text.trim()) ocrLines.push(text.trim());
+            const cleanText = normalizePaddleText(text);
+            if (cleanText) ocrLines.push(cleanText);
         });
 
         if (captureGeneration !== myGen) {

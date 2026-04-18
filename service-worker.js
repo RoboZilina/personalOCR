@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personalocr-v3.8.4-gold-patch2';
+const CACHE_NAME = 'personalocr-v3.8.4-gold-patch3';
 
 /**
  * Normalize URL to pathname-only for consistent cache keys.
@@ -124,11 +124,20 @@ self.addEventListener('fetch', (event) => {
 
       return fetch(event.request).then(async (networkResponse) => {
         // Cache successful same-origin responses for future offline use
+        // But avoid caching HTML fallbacks for JS/JSON/WASM requests
         if (networkResponse && networkResponse.status === 200) {
-          const cache = await caches.open(CACHE_NAME);
-          // Must clone before reading/returning the response
-          // Store with exact URL (including version query params)
-          await cache.put(event.request, networkResponse.clone());
+          const contentType = networkResponse.headers.get('content-type') || '';
+          const url = event.request.url;
+          const isAsset = url.endsWith('.js') || url.endsWith('.json') || url.endsWith('.wasm') || url.endsWith('.mjs');
+          const isHtml = contentType.includes('text/html');
+          
+          // Don't cache HTML responses for asset requests (prevents SPA fallback pollution)
+          if (!isAsset || !isHtml) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, networkResponse.clone());
+          } else if (isAsset && isHtml) {
+            console.warn('[SW:FETCH] Refusing to cache HTML response for asset:', url);
+          }
         }
         return networkResponse;
       }).catch(async () => {

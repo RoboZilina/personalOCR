@@ -377,7 +377,7 @@ export class PaddleOCR {
                 dims = [1, dims[0], dims[1]];
             }
 
-            const text = this._ctcGreedyDecode(logits, dims);
+            const decoded = this._ctcGreedyDecode(logits, dims);
             
             if (window.VNOCR_DEBUG) {
                 const elapsed = (performance.now() - start).toFixed(1);
@@ -387,7 +387,7 @@ export class PaddleOCR {
             // Memory Cleanup
             logits = null;
 
-            return { text };
+            return decoded;
         } catch (err) {
             console.error("[ENGINE] PaddleOCR Inference Error:", err);
             return { text: '' };

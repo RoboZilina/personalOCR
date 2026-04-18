@@ -307,6 +307,7 @@ async function switchEngineModular(id) {
 
         // Memory guard: evict heavy engines (MangaOCR ~1.2GB) when not active
         EngineManager.evictOtherEngines(id);
+        checkAndShowCleanupBanner();
 
         // 4) Restore UI Selectors
         if (engineSelector) {

@@ -65,23 +65,24 @@ const NORMALIZED_ASSETS = ASSETS.map(normalizeUrl);
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
-      .then(() => {
+      // Thread cache reference so the integrity check reuses the same handle
+      // instead of issuing a redundant second caches.open() call.
+      .then((cache) => cache.addAll(ASSETS).then(() => cache))
+      .then((cache) => cache.keys().then(keys => ({ cache, keys })))
+      .then(({ cache, keys }) => {
         // Integrity check: verify cached keys match normalized assets
-        return caches.open(CACHE_NAME).then(cache => cache.keys()).then(keys => {
-          const cachedPaths = keys.map(r => new URL(r.url).pathname);
-          const missing = NORMALIZED_ASSETS.filter(a => a !== '/' && !cachedPaths.includes(a));
-          const extra = cachedPaths.filter(c => c !== '/' && !NORMALIZED_ASSETS.includes(c));
-          if (missing.length > 0) {
-            console.warn('[SW:INSTALL] Cache mismatch - missing assets:', missing);
-            // Auto-heal: re-populate missing assets
-            console.log('[SW:INSTALL] Auto-healing cache with missing assets...');
-            return cache.addAll(missing);
-          }
-          if (extra.length > 0) {
-            console.warn('[SW:INSTALL] Cache mismatch - unexpected extra assets:', extra);
-          }
-        });
+        const cachedPaths = keys.map(r => new URL(r.url).pathname);
+        const missing = NORMALIZED_ASSETS.filter(a => a !== '/' && !cachedPaths.includes(a));
+        const extra = cachedPaths.filter(c => c !== '/' && !NORMALIZED_ASSETS.includes(c));
+        if (missing.length > 0) {
+          console.warn('[SW:INSTALL] Cache mismatch - missing assets:', missing);
+          // Auto-heal: re-populate missing assets
+          console.log('[SW:INSTALL] Auto-healing cache with missing assets...');
+          return cache.addAll(missing);
+        }
+        if (extra.length > 0) {
+          console.warn('[SW:INSTALL] Cache mismatch - unexpected extra assets:', extra);
+        }
       })
       .then(() => self.skipWaiting())
   );

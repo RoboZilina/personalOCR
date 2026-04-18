@@ -37,39 +37,24 @@ export class MangaOCREngine {
         this.decoderLogitsBuffer = null;
         this.decoderMaxLength = 256;
 
-        // Task 2: Encoder caching fields
-        this._encoderCacheKey = null;
-        this._encoderCacheOutput = null;
+        // Encoder results are not cached — per-frame correctness requires fresh inference.
+        // (A dimension-based cache key cannot distinguish frames of the same resolution.)
     }
 
-    // Task 2: Helper to compute image key for caching
-    _computeImageKey(imageData) {
-        return `${imageData.width}x${imageData.height}:${imageData.data?.length ?? 0}`;
-    }
-
-    // Task 2: Helper to build encoder feeds
-    _buildEncoderFeeds(imageData) {
-        return { pixel_values: imageData };
-    }
-
-    // Task 2: Wrapper for encoder with caching
+    /**
+     * Runs the ViT encoder on the given pixel tensor.
+     * Results are NOT cached — each OCR frame must produce a fresh encoder output.
+     * (The former cache used ort.Tensor.width/height which are undefined, causing
+     * every frame to collide on the same key and return the first frame's output.)
+     * @param {ort.Tensor} imageData - pixel_values tensor [1,3,224,224]
+     * @returns {Promise<Object>} Raw encoder output from ONNX Runtime
+     */
     async _runEncoder(imageData) {
-        const key = this._computeImageKey(imageData);
-        if (this._encoderCacheKey === key && this._encoderCacheOutput) {
-            return this._encoderCacheOutput;
-        }
-        const feeds = this._buildEncoderFeeds(imageData);
-        const out = await this.encoderSession.run(feeds);
-        this._encoderCacheKey = key;
-        this._encoderCacheOutput = out;
-        return out;
+        return await this.encoderSession.run({ pixel_values: imageData });
     }
 
-    // Task 2: Reset cache
-    reset() {
-        this._encoderCacheKey = null;
-        this._encoderCacheOutput = null;
-    }
+    /** @deprecated Cache was removed; kept as a no-op for API compatibility. */
+    reset() {}
 
     /**
      * Hybrid Integrity Check (Hardening v2.1.10).

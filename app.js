@@ -333,11 +333,9 @@ const EngineManager = (() => {
      * State-Aware Engine Loader
      * Implements promise deduplication and background readiness.
      */
-    // Heavy engines that should load in worker
-    const HEAVY_ENGINES = new Set(['paddle', 'manga']);
-
     async function getOrLoadEngine(id, isSilent = false) {
-        console.trace(`[ENGINE] getOrLoadEngine(${id})`);
+        // Bug #9 fix: gate stack trace behind debug flag (was unconditional console.trace)
+        if (window.VNOCR_DEBUG) console.trace(`[ENGINE] getOrLoadEngine(${id})`);
 
         let meta = engineMetadata.get(id);
 
@@ -350,25 +348,11 @@ const EngineManager = (() => {
         if (meta.state === 'ready') return meta.instance;
         if (meta.state === 'loading') return meta.loadPromise;
 
-        // 2. Heavy engines → worker path
-        if (HEAVY_ENGINES.has(id)) {
-            meta.state = 'loading';
-            const workerPromise = loadEngineInWorker(id)
-                .then(payload => rehydrateEngine(id, payload))
-                .then(instance => {
-                    meta.instance = instance;
-                    meta.state = 'ready';
-                    return instance;
-                })
-                .catch(err => {
-                    console.warn(`[ENGINE] Worker load failed for ${id}, falling back to main thread:`, err);
-                    return loadEngineMainThread(id, isSilent);
-                });
-            meta.loadPromise = workerPromise;
-            return workerPromise;
-        }
-
-        // 3. Start Loading Lifecycle (lightweight engines)
+        // 2. Start Loading Lifecycle (all engines load on the main thread)
+        // ONNX InferenceSession objects are not transferable across Worker boundaries,
+        // so a Worker-based preload cannot hand off a live session to the main thread.
+        // All engines load via cooperative async scheduling. Tesseract always anchors
+        // interactivity first; Paddle/Manga preload silently in the background.
         meta.state = 'loading';
         const loadStartTime = performance.now();
 
@@ -604,42 +588,67 @@ const EngineManager = (() => {
      * Silent initialization of core engines.
      * Paddle always loads in worker, Manga only if selected, Tesseract on main thread.
      */
+    /**
+     * Silent background preloading of core engines.
+     * All loads run on the main thread via cooperative async scheduling (isSilent=true).
+     * getOrLoadEngine's built-in deduplication guarantees no double-loads even if an
+     * engine is already loading or was already set active before this is called.
+     */
     async function preloadCoreEngines() {
         if (window.VNOCR_DEBUG) console.debug("[ENGINE] Preloading core engines...");
 
         const savedEngine = getSetting('ocrEngine') || 'tesseract';
-        const preloadPromises = [];
 
-        // Tesseract: main thread (lightweight)
-        preloadPromises.push(getOrLoadEngine('tesseract', true));
-
-        // Paddle: ALWAYS in worker (heavy)
-        preloadPromises.push(
-            loadEngineInWorker('paddle')
-                .then(payload => rehydrateEngine('paddle', payload))
-                .catch(err => {
-                    console.warn('[ENGINE] Paddle worker preload failed, falling back:', err);
-                    return getOrLoadEngine('paddle', true);
-                })
+        // Tesseract is already loaded at startup — guaranteed deduplication no-op.
+        getOrLoadEngine('tesseract', true).catch(err =>
+            console.warn('[ENGINE] Tesseract silent preload failed:', err)
         );
 
-        // Manga: only in worker if selected
-        if (savedEngine === 'manga') {
-            preloadPromises.push(
-                loadEngineInWorker('manga')
-                    .then(payload => rehydrateEngine('manga', payload))
-                    .catch(err => {
-                        console.warn('[ENGINE] Manga worker preload failed, falling back:', err);
-                        return getOrLoadEngine('manga', true);
-                    })
+        // Paddle: always warm up silently so the first engine switch is instant.
+        // Skip if Paddle is already the active engine (it's being loaded explicitly).
+        if (savedEngine !== 'paddle') {
+            getOrLoadEngine('paddle', true).catch(err =>
+                console.warn('[ENGINE] Paddle silent preload failed:', err)
             );
         }
 
-        try {
-            await Promise.all(preloadPromises);
-            if (window.VNOCR_DEBUG) console.debug("[ENGINE] Core preloading complete.");
-        } catch (err) {
-            console.warn("[ENGINE] Preload partially failed:", err);
+        // Manga: only warm up if it was the previously selected engine.
+        if (savedEngine === 'manga') {
+            getOrLoadEngine('manga', true).catch(err =>
+                console.warn('[ENGINE] Manga silent preload failed:', err)
+            );
+        }
+
+        if (window.VNOCR_DEBUG) console.debug("[ENGINE] Core preload dispatched (background).");
+    }
+
+    /**
+     * Disposes a single engine by ID, releasing its ONNX sessions and resetting
+     * its metadata state. Safe to call even if the engine is not loaded.
+     * @param {string} id - Engine ID: 'paddle', 'manga', or 'tesseract'
+     */
+    async function disposeEngine(id) {
+        const meta = engineMetadata.get(id);
+        if (!meta) return;
+
+        const engine = meta.instance;
+        if (engine && typeof engine.dispose === 'function') {
+            try {
+                await engine.dispose();
+                if (window.VNOCR_DEBUG) console.debug(`[ENGINE] Disposed: ${id}`);
+            } catch (err) {
+                console.error(`[ENGINE] dispose failed for ${id}:`, err);
+            }
+        }
+
+        engineMetadata.set(id, { instance: null, state: 'not_loaded', loadPromise: null });
+
+        // If we disposed the currently active engine, clear the active state.
+        if (currentEngineId === id) {
+            currentEngine = null;
+            currentEngineId = null;
+            isReady = false;
+            notifyStatus('idle', 'Engine unloaded');
         }
     }
 
@@ -760,7 +769,7 @@ const EngineManager = (() => {
 
     return {
         onReady, onLoading, onError, onStatusChange,
-        switchEngine, preloadCoreEngines, disposeAllEngines,
+        switchEngine, preloadCoreEngines, disposeAllEngines, disposeEngine,
         getOrLoadEngine, evictOtherEngines, loadEngineInWorker, rehydrateEngine, loadEngineMainThread,
         runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
         isReady: () => isReady,
@@ -1892,9 +1901,8 @@ function applyPreprocessing(canvas, mode) {
     const ctx = res.getContext('2d'); ctx.drawImage(canvas, 0, 0);
     const id = ctx.getImageData(0, 0, res.width, res.height); const d = id.data;
     let workingId = null;
-    if (mode === 'raw') {
-        return lr_addPadding(canvas, 10);
-    } else if (mode === 'binarize') {
+    // Note: mode === 'raw' is handled by the early return on line 1887 (before upscale)
+    if (mode === 'binarize') {
         canvas = invertCanvas(canvas);
         canvas = sharpenCanvas(canvas);
 
@@ -2192,19 +2200,42 @@ function showMultiPassOverlay(results, finalText) {
     const active = getSetting('ocrEngine') || 'tesseract';
     const label = active === 'paddle' ? 'PaddleOCR' : (active === 'manga' ? 'MangaOCR' : 'Tesseract');
 
-    let html = `<div style="font-size:10px; opacity:0.8; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px;">Analyzing: ${label}</div>`;
+    // XSS fix: build the overlay using safe DOM APIs instead of innerHTML.
+    // OCR output is user-sourced screen content and must never be treated as HTML.
+    const metaEl = document.createElement('div');
+    metaEl.style.cssText = 'font-size:10px; opacity:0.8; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px;';
+    metaEl.textContent = `Analyzing: ${label}`;
+    body.appendChild(metaEl);
 
     results.forEach((r, i) => {
-        html += `<strong>Pass ${i + 1}</strong><br>`;
-        html += `Confidence: ${r.confidence}<br>`;
-        html += `Density: ${scoreJapaneseDensity(r.text)}<br>`;
-        html += `Weighted: ${weightedScore(r)}<br>`;
-        html += `Text: ${r.text}<br><br>`;
+        const passEl = document.createElement('div');
+        passEl.style.marginBottom = '8px';
+
+        const title = document.createElement('strong');
+        title.textContent = `Pass ${i + 1}`;
+        passEl.appendChild(title);
+        passEl.appendChild(document.createElement('br'));
+        passEl.appendChild(document.createTextNode(`Confidence: ${r.confidence}`));
+        passEl.appendChild(document.createElement('br'));
+        passEl.appendChild(document.createTextNode(`Density: ${scoreJapaneseDensity(r.text)}`));
+        passEl.appendChild(document.createElement('br'));
+        passEl.appendChild(document.createTextNode(`Weighted: ${weightedScore(r).toFixed(2)}`));
+        passEl.appendChild(document.createElement('br'));
+        passEl.appendChild(document.createTextNode('Text: '));
+        const textSpan = document.createElement('span');
+        textSpan.textContent = r.text; // safe: textContent, not innerHTML
+        passEl.appendChild(textSpan);
+        body.appendChild(passEl);
     });
 
-    html += `<strong>Final:</strong> ${finalText}`;
-
-    body.innerHTML = html;
+    const finalEl = document.createElement('div');
+    const finalLabel = document.createElement('strong');
+    finalLabel.textContent = 'Final: ';
+    finalEl.appendChild(finalLabel);
+    const finalSpan = document.createElement('span');
+    finalSpan.textContent = finalText; // safe: textContent, not innerHTML
+    finalEl.appendChild(finalSpan);
+    body.appendChild(finalEl);
 
     div.appendChild(header);
     div.appendChild(body);
@@ -2337,13 +2368,9 @@ function initSettings() {
     applySettingsToUI(); // Initial sync for Theme/Visuals
 
     // Gold v3.1 Hardened Persistence: Real-time wiring for sliders and checkboxes
-    if (upscaleSlider) {
-        upscaleSlider.oninput = () => {
-            const val = parseFloat(upscaleSlider.value);
-            setSetting('upscaleFactor', val);
-            if (upscaleVal) upscaleVal.textContent = val.toFixed(1);
-        };
-    }
+    // upscaleSlider is wired exclusively in initEventListeners to prevent double-assignment.
+    // (Previously assigned here AND in initEventListeners; the second assignment silently
+    // overwrote this one, making persistence depend on which function ran last.)
 
     const heavyWarningCheckbox = document.getElementById('banner-nocall-checkbox');
     if (heavyWarningCheckbox) {
@@ -2369,13 +2396,15 @@ function initSettings() {
         uiEngine = 'tesseract';
     }
 
-    if (uiEngine === 'tesseract') {
-        engineSelector.value = 'tesseract';
-    } else if (uiEngine === 'manga') {
-        engineSelector.value = 'manga';
-    } else {
-        // Assume paddle variant or fallback
-        engineSelector.value = uiEngine.startsWith('paddle_') ? uiEngine : `paddle_${paddleLines}`;
+    if (engineSelector) { // null guard: element may be absent in stripped builds
+        if (uiEngine === 'tesseract') {
+            engineSelector.value = 'tesseract';
+        } else if (uiEngine === 'manga') {
+            engineSelector.value = 'manga';
+        } else {
+            // Assume paddle variant or fallback
+            engineSelector.value = uiEngine.startsWith('paddle_') ? uiEngine : `paddle_${paddleLines}`;
+        }
     }
 
     // Update guides if present (handled via drawSelectionRect indirectly)
@@ -2647,7 +2676,23 @@ async function globalInitialize() {
         updatePerformanceStatus();
     }
 
-    // 4. Silicon Seal Registry Initialization
+    // 4. Engine Observer Registration
+    // MUST precede any engine switch. Without this ordering, if Tesseract loads from
+    // cache instantly, 'ready' fires before listeners are registered — leaving
+    // engineReady=false and the capture button permanently disabled (Bug #4).
+    EngineManager.onReady(() => {
+        engineReady = true;
+        updateCaptureButtonState();
+    });
+    EngineManager.onLoading(() => {
+        engineReady = false;
+        updateCaptureButtonState();
+    });
+    EngineManager.onStatusChange(({ state, text, progress, engineId }) => {
+        setOCRStatus(state, text, progress, engineId);
+    });
+
+    // 5. Silicon Seal Registry Initialization
     // We strictly prioritize Tesseract to ensure the UI is functional within <500ms.
     const savedEngine = getSetting('ocrEngine') || 'tesseract';
 
@@ -2673,9 +2718,11 @@ async function globalInitialize() {
                 });
         }
 
-        // Step 4: Silent background preloads (Always warm up Paddle for zero-wait switching)
-        if (!getSetting('skipPreloading') && savedEngine !== 'paddle') {
-            EngineManager.getOrLoadEngine('paddle', true).catch(err => console.warn('[BOOT] Preload failed:', err));
+        // Step 4: Silent background preloads via the canonical preloadCoreEngines path.
+        // getOrLoadEngine's built-in deduplication ensures no double-load for the
+        // engine that was already switched to above.
+        if (!getSetting('skipPreloading')) {
+            EngineManager.preloadCoreEngines();
         }
 
         applySettingsToUI();
@@ -2736,19 +2783,8 @@ async function globalInitialize() {
         // Logic moved to Step 2 for speed
     }
 
-    // 5. Post-Stabilization Observers
-    EngineManager.onReady(() => {
-        engineReady = true;
-        updateCaptureButtonState();
-    });
-    EngineManager.onLoading(() => {
-        engineReady = false;
-        updateCaptureButtonState();
-    });
-    EngineManager.onStatusChange(({ state, text, progress, engineId }) => {
-        setOCRStatus(state, text, progress, engineId);
-    });
-
+    // 5. Sync engine readiness state (observers are already registered; this is
+    // a one-time snapshot in case the initial switch resolved before the event fired)
     engineReady = EngineManager.isReady();
     updateCaptureButtonState();
 
@@ -2834,11 +2870,12 @@ function initEventListeners() {
     }
 
     if (upscaleSlider) {
+        // Single authoritative handler: persists on every input tick (smooth dragging).
+        // onchange removed — oninput already covers persistence without the double-fire.
         upscaleSlider.oninput = (e) => {
-            if (upscaleVal) upscaleVal.textContent = parseFloat(e.target.value).toFixed(1);
-        };
-        upscaleSlider.onchange = (e) => {
-            setSetting('upscaleFactor', parseFloat(e.target.value));
+            const val = parseFloat(e.target.value);
+            setSetting('upscaleFactor', val);
+            if (upscaleVal) upscaleVal.textContent = val.toFixed(1);
         };
     }
 

@@ -1291,6 +1291,21 @@ function hideEngineCleanupBanner() {
     document.getElementById('engineCleanupBanner').classList.add('hidden');
 }
 
+function checkAndShowCleanupBanner() {
+    if (typeof EngineManager === 'undefined') return;
+    
+    const current = EngineManager.getInfo?.()?.id;
+    const metaP = EngineManager.getEngineMetadata?.('paddle');
+    const metaM = EngineManager.getEngineMetadata?.('manga');
+
+    if ((metaP?.state === 'ready' && current !== 'paddle') ||
+        (metaM?.state === 'ready' && current !== 'manga')) {
+        showEngineCleanupBanner();
+    } else {
+        hideEngineCleanupBanner();
+    }
+}
+
 function normalizePaddleText(result) {
     if (!result) return "";
 
@@ -2741,6 +2756,7 @@ async function globalInitialize() {
     EngineManager.onReady(() => {
         engineReady = true;
         updateCaptureButtonState();
+        checkAndShowCleanupBanner();
     });
     EngineManager.onLoading(() => {
         engineReady = false;
@@ -2799,16 +2815,8 @@ async function globalInitialize() {
 
         applySettingsToUI();
 
-        // Step 4b: Show cleanup banner if unused engines are loaded
-        const currentEngineId = EngineManager.getInfo?.()?.id;
-        const paddleMeta = EngineManager.getEngineMetadata?.('paddle');
-        const mangaMeta = EngineManager.getEngineMetadata?.('manga');
-        if (paddleMeta?.state === 'ready' && currentEngineId !== 'paddle') {
-            showEngineCleanupBanner();
-        }
-        if (mangaMeta?.state === 'ready' && currentEngineId !== 'manga') {
-            showEngineCleanupBanner();
-        }
+        // Banner check is now handled dynamically in EngineManager.onReady
+        // to correctly catch engines that finish background loading.
 
         // Step 5: History Loading (Restore context)
         if (historyContent) {
@@ -3004,9 +3012,12 @@ function initEventListeners() {
         closeMenu();
     };
 
+    // Global Engine Unload (Hamburger Menu)
     if (menuPurge) menuPurge.onclick = async () => {
         if (confirm("Unload all OCR engines from memory? This is recommended for mobile devices or if performance slows down.")) {
+            // Option A: Auto-switch to Tesseract fallback
             await EngineManager.disposeAllEngines();
+            switchEngineModular('tesseract');
             closeMenu();
         }
     };
@@ -3019,14 +3030,21 @@ function initEventListeners() {
     };
 
     // Engine Cleanup Banner Buttons
-    document.getElementById('purgePaddleBtn')?.addEventListener('click', () => {
+    document.getElementById('purgePaddleBtn')?.addEventListener('click', async () => {
+        const wasActive = EngineManager.getInfo?.()?.id === 'paddle';
         EngineManager.disposeEngine?.('paddle');
         hideEngineCleanupBanner();
+        // Option A: if active engine was purged, drop safely to tesseract
+        if (wasActive) switchEngineModular('tesseract');
     });
-    document.getElementById('purgeMangaBtn')?.addEventListener('click', () => {
+    
+    document.getElementById('purgeMangaBtn')?.addEventListener('click', async () => {
+        const wasActive = EngineManager.getInfo?.()?.id === 'manga';
         EngineManager.disposeEngine?.('manga');
         hideEngineCleanupBanner();
+        if (wasActive) switchEngineModular('tesseract');
     });
+    
     document.getElementById('dismissCleanupBanner')?.addEventListener('click', () => {
         hideEngineCleanupBanner();
     });

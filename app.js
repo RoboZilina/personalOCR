@@ -622,12 +622,22 @@ function checkAndShowCleanupBanner() {
     const current = EngineManager.getInfo?.()?.id;
     const metaP = EngineManager.getEngineMetadata?.('paddle');
     const metaM = EngineManager.getEngineMetadata?.('manga');
+    const purgePaddleBtn = document.getElementById('purgePaddleBtn');
+    const purgeMangaBtn = document.getElementById('purgeMangaBtn');
 
-    console.log('[BANNER-CHECK] current:', current, 'metaP:', metaP?.state, 'metaM:', metaM?.state);
+    if (purgePaddleBtn) {
+        const isPaddleActive = current === 'paddle';
+        purgePaddleBtn.disabled = isPaddleActive;
+        purgePaddleBtn.classList.toggle('disabled', isPaddleActive);
+    }
 
-    if ((metaP?.state === 'ready' && current !== 'paddle') ||
-        (metaM?.state === 'ready' && current !== 'manga')) {
-        console.log('[BANNER-CHECK] Showing banner');
+    if (purgeMangaBtn) {
+        const isMangaActive = current === 'manga';
+        purgeMangaBtn.disabled = isMangaActive;
+        purgeMangaBtn.classList.toggle('disabled', isMangaActive);
+    }
+
+    if (metaP?.state === 'ready' && metaM?.state === 'ready') {
         showEngineCleanupBanner();
     } else {
         hideEngineCleanupBanner();
@@ -2104,17 +2114,21 @@ function initEventListeners() {
     
     // Global handler functions for HTML onclick fallback
     window.purgePaddleFromBanner = async () => {
-        const wasActive = EngineManager.getInfo?.()?.id === 'paddle';
+        if (EngineManager.getInfo?.()?.id === 'paddle') {
+            checkAndShowCleanupBanner();
+            return;
+        }
         await EngineManager.disposeEngine?.('paddle');
-        hideEngineCleanupBanner();
-        if (wasActive) switchEngineModular('tesseract');
+        checkAndShowCleanupBanner();
     };
     
     window.purgeMangaFromBanner = async () => {
-        const wasActive = EngineManager.getInfo?.()?.id === 'manga';
+        if (EngineManager.getInfo?.()?.id === 'manga') {
+            checkAndShowCleanupBanner();
+            return;
+        }
         await EngineManager.disposeEngine?.('manga');
-        hideEngineCleanupBanner();
-        if (wasActive) switchEngineModular('tesseract');
+        checkAndShowCleanupBanner();
     };
     
     window.dismissCleanupFromBanner = () => {

@@ -103,6 +103,8 @@ import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support
 window.STATUS = STATUS;
 window.setOCRStatus = setOCRStatus;
 window.updateCaptureButtonState = updateCaptureButtonState;
+window.captureFrame = captureFrame;
+window.getSetting = getSetting;
 
 const splashHints = [
     "PaddleOCR: Highest accuracy, but longest warm-up time.",
@@ -371,6 +373,8 @@ let videoStream = null;
 let captureGeneration = 0;
 let selectionRect = null;
 let multiPassOverlayCollapsed = false;
+window.captureGeneration = captureGeneration;
+window.selectionRect = selectionRect;
 
 
 // Smart Scout: 32x32 Comparison Logic
@@ -724,6 +728,7 @@ function setupSelectionOverlay() {
         const hint = document.getElementById('selection-hint');
         if (isValidCrop) {
             selectionRect = finalRect;
+            window.selectionRect = selectionRect;
 
             // Throttled First Capture (Patch v2.5)
             if (!captureLocked && engineReady) {
@@ -744,9 +749,11 @@ function setupSelectionOverlay() {
         } else {
             if (previousSelectionRect) {
                 selectionRect = previousSelectionRect;
+                window.selectionRect = selectionRect;
                 if (hint) hint.classList.remove('visible');
             } else {
                 selectionRect = null;
+                window.selectionRect = selectionRect;
                 if (hint) hint.classList.add('visible');
                 setOCRStatus('ready', '⚪ Selection too small (min 8x8px)');
             }
@@ -853,6 +860,7 @@ function denormalizeSelection(rect, videoEl, overlayEl) {
     // if (getSetting('debug')) console.debug('[VN-OCR] selection:', { x, y, w, h, vWidth, vHeight });
     return { x, y, w, h };
 }
+window.denormalizeSelection = denormalizeSelection;
 
 /** 
  * Update the debug thumbnail from a preprocessed canvas.
@@ -1771,6 +1779,8 @@ async function globalInitialize() {
     selectWindowBtn = document.getElementById('select-window-btn');
     vnVideo = document.getElementById('vn-video');
     selectionOverlay = document.getElementById('selection-overlay');
+    window.vnVideo = vnVideo;
+    window.selectionOverlay = selectionOverlay;
     historyContent = document.getElementById('history-content');
     ttsVoiceSelect = document.getElementById('tts-voice-select');
     speakLatestBtn = document.getElementById('speak-latest-btn');
@@ -1781,6 +1791,7 @@ async function globalInitialize() {
     clearHistoryBtn = document.getElementById('clear-history-btn');
     engineSelector = document.getElementById('model-selector');
     modeSelector = document.getElementById('mode-selector');
+    window.modeSelector = modeSelector;
     autoToggle = document.getElementById('auto-capture-toggle');
     autoCaptureBtn = document.getElementById('auto-capture-btn');
     upscaleSlider = document.getElementById('upscale-slider');

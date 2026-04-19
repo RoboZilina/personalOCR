@@ -15,6 +15,16 @@ async function captureFrame(rect = null) {
 
     // Hardening v3.8: Combined readiness and processing lock
     if (window.isProcessing || !window.EngineManager.isReady()) return;
+
+    if (!window.vnVideo || !window.selectionOverlay || typeof window.denormalizeSelection !== 'function') {
+        window.setOCRStatus(window.STATUS.READY, '⚪ Capture surface not ready');
+        return;
+    }
+
+    if (!window.vnVideo.videoWidth || !window.vnVideo.videoHeight) {
+        window.setOCRStatus(window.STATUS.READY, '⚪ Waiting for video frame...');
+        return;
+    }
     
     const myGen = ++window.captureGeneration;
     let lockReleased = false;
@@ -49,7 +59,7 @@ async function captureFrame(rect = null) {
     window.EngineManager._notifyStatus(window.STATUS.PROCESSING, '🟡 Processing...', null, pinnedId);
     await new Promise(r => setTimeout(r, 0)); // yield to browser for repaint
     
-    const mode = window.modeSelector.value;
+    const mode = window.modeSelector?.value || 'default_mini';
     
     try {
         // Tesseract Multi-Pass Branch
@@ -108,7 +118,7 @@ async function captureFrame(rect = null) {
         }
 
         // Generic Pipeline Branch (Paddle / Manga / Tesseract Single)
-        const lineCount = window.getSetting('paddleLineCount') || 1;
+        const lineCount = (typeof window.getSetting === 'function' ? window.getSetting('paddleLineCount') : 1) || 1;
         const preStart = performance.now();
         const canvases = await preprocessForEngine(pinnedId, rawCropCanvas, mode, lineCount);
         window.perfStats.preprocess = performance.now() - preStart;
@@ -253,7 +263,8 @@ async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
     }
     
     // Fallback 1: Try registry entry preprocess
-    const entry = window.VNOCR_ENGINES[engineId];
+    const registry = window.VNOCR_ENGINES || {};
+    const entry = registry[engineId];
     if (entry && typeof entry.preprocess === 'function') {
         try {
             return await entry.preprocess(rawCanvas, mode, lineCount);

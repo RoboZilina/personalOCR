@@ -650,6 +650,7 @@ function setupSelectionOverlay() {
     if (!selectionOverlay) return;
     const ctx = selectionOverlay.getContext('2d');
     let isSelecting = false, startX = 0, startY = 0, currentX = 0, currentY = 0;
+    let previousSelectionRect = null;
     const resizeCanvas = () => {
         selectionOverlay.width = selectionOverlay.clientWidth;
         selectionOverlay.height = selectionOverlay.clientHeight;
@@ -665,7 +666,8 @@ function setupSelectionOverlay() {
         if (e.button !== 0) return;
         isSelecting = true; const pos = getMousePos(e);
         startX = currentX = pos.x; startY = currentY = pos.y;
-        selectionRect = null; drawSelectionRect();
+        previousSelectionRect = selectionRect ? { ...selectionRect } : null;
+        drawSelectionRect();
         const hint = document.getElementById('selection-hint');
         if (hint) hint.classList.remove('visible');
     };
@@ -739,9 +741,14 @@ function setupSelectionOverlay() {
 
             if (hint) hint.classList.remove('visible');
         } else {
-            selectionRect = null;
-            if (hint) hint.classList.add('visible');
-            setOCRStatus('ready', '⚪ Selection too small (min 8x8px)');
+            if (previousSelectionRect) {
+                selectionRect = previousSelectionRect;
+                if (hint) hint.classList.remove('visible');
+            } else {
+                selectionRect = null;
+                if (hint) hint.classList.add('visible');
+                setOCRStatus('ready', '⚪ Selection too small (min 8x8px)');
+            }
         }
         drawSelectionRect();
     });

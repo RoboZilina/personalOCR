@@ -34,7 +34,10 @@ function updateCaptureButtonState() {
  */
 function setOCRStatus(state, text, progress = null, sourceId = null) {
     // 1. Internal EngineManager Sync
-    if (window.EngineManager && typeof window.EngineManager._notifyStatus === 'function') {
+    // Only forward UI-originated status updates (no explicit sourceId).
+    // Engine-originated updates already come through EngineManager.onStatusChange;
+    // rebroadcasting them here causes status loops and can relabel source engines.
+    if (sourceId == null && window.EngineManager && typeof window.EngineManager._notifyStatus === 'function') {
         window.EngineManager._notifyStatus(state, text, progress);
     }
 
@@ -42,19 +45,18 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
     const statusLabel = document.getElementById('status-text');
     if (!ocrStatus || !statusLabel) return;
 
-    // 2. Silent Preload Guard
-    // If update is from an engine that isn't the current target, discard unless it's an error or READY.
-    // Allow READY from background engines so UI can reflect successful preloads.
-    // Only filter if sourceId is explicitly provided (defined) and different from activeId.
+    // 2. Active Engine Guard
+    // Status pill must represent the active engine only.
+    // Ignore all explicitly sourced non-active engine updates (including READY)
+    // so background preload events never overwrite active-engine status.
     // Guard against uninitialized EngineManager or null getInfo() during early init.
     const activeInfo = (typeof window.EngineManager !== 'undefined' && window.EngineManager.getInfo) ? window.EngineManager.getInfo() : {};
     const activeId = activeInfo?.id || null;
-    
-    // Filter only LOADING/PROCESSING/DOWNLOADING from non-active engines
-    // Allow ERROR (always show errors) and READY (show successful preloads)
-    const isNoisyProgressState = [STATUS.LOADING, STATUS.DOWNLOADING, STATUS.WARMING, STATUS.PROCESSING].includes(state);
-    if (typeof sourceId === 'string' && sourceId !== activeId && isNoisyProgressState) {
-        if (getSetting('debug')) console.debug(`[STATUS-DEBUG] Filtering silent preload progress from ${sourceId} (active: ${activeId}, state: ${state})`);
+
+    if (typeof sourceId === 'string' && activeId && sourceId !== activeId) {
+        if (window.VNOCR_DEBUG || getSetting('debug')) {
+            console.debug(`[STATUS-DEBUG] Dropped non-active status from ${sourceId} (active: ${activeId}, state: ${state})`);
+        }
         return;
     }
 

@@ -83,8 +83,10 @@ body {
     font-weight: 700;
     white-space: nowrap;
     flex-shrink: 0;
+    position: relative;
 }
-#manga-note.visible { display: flex; }
+#manga-note.visible { display: inline-flex; }
+#manga-note .warning-header { display: inline-flex; }
 #manga-note .manga-note-icon {
     display: none;
     width: 18px;
@@ -96,6 +98,31 @@ body {
     font-size: 11px;
     font-weight: 800;
     line-height: 1;
+}
+#manga-note .warning-details {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: min(420px, calc(100vw - 24px));
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    padding: 0;
+    margin: 0;
+    border-top: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    white-space: normal;
+    z-index: 1200;
+    pointer-events: none;
+}
+#manga-note.expanded .warning-details {
+    max-height: 300px;
+    opacity: 1;
+    padding: 10px 12px;
+    pointer-events: auto;
 }
 
 /* MAIN WORKSPACE */

@@ -376,6 +376,18 @@ let selectionRect = null;
 let multiPassOverlayCollapsed = false;
 window.captureGeneration = captureGeneration;
 window.selectionRect = selectionRect;
+window.lastValidSelectionRect = null;
+
+function setSelectionRect(rect) {
+    selectionRect = rect;
+    window.selectionRect = rect;
+    if (rect && Number.isFinite(rect.x) && Number.isFinite(rect.y)
+        && Number.isFinite(rect.width) && Number.isFinite(rect.height)
+        && rect.width > 0 && rect.height > 0) {
+        window.lastValidSelectionRect = { ...rect };
+    }
+}
+window.setSelectionRect = setSelectionRect;
 
 
 // Smart Scout: 32x32 Comparison Logic
@@ -654,6 +666,8 @@ function normalizePaddleText(result) {
 
 function setupSelectionOverlay() {
     if (!selectionOverlay) return;
+    if (window.__selectionOverlayInitialized) return;
+    window.__selectionOverlayInitialized = true;
     const ctx = selectionOverlay.getContext('2d');
     let isSelecting = false, startX = 0, startY = 0, currentX = 0, currentY = 0;
     let previousSelectionRect = null;
@@ -728,8 +742,7 @@ function setupSelectionOverlay() {
         };
         const hint = document.getElementById('selection-hint');
         if (isValidCrop) {
-            selectionRect = finalRect;
-            window.selectionRect = selectionRect;
+            setSelectionRect(finalRect);
 
             // Throttled First Capture (Patch v2.5)
             if (!captureLocked && engineReady) {
@@ -749,12 +762,10 @@ function setupSelectionOverlay() {
             if (hint) hint.classList.remove('visible');
         } else {
             if (previousSelectionRect) {
-                selectionRect = previousSelectionRect;
-                window.selectionRect = selectionRect;
+                setSelectionRect(previousSelectionRect);
                 if (hint) hint.classList.remove('visible');
             } else {
-                selectionRect = null;
-                window.selectionRect = selectionRect;
+                setSelectionRect(null);
                 if (hint) hint.classList.add('visible');
                 setOCRStatus('ready', '⚪ Selection too small (min 8x8px)');
             }
@@ -788,13 +799,14 @@ function setupSelectionOverlay() {
 // ==========================================
 
 function checkAutoCapture() {
-    if (!autoToggle || !autoToggle.checked || !videoStream || !selectionRect) return;
+    const activeSelection = selectionRect || window.lastValidSelectionRect;
+    if (!autoToggle || !autoToggle.checked || !videoStream || !activeSelection) return;
 
     // 1. Maintain scout data even during processing to prevent "stale" comparison after long loads.
     // IMPORTANT: Auto-capture must keep lastScoutData fresh even while isProcessing is true,
     // otherwise it will "wake up blind" after long operations (like PaddleOCR load)
     // and fire phantom double OCR triggers.
-    const sel = denormalizeSelection(selectionRect, vnVideo, selectionOverlay);
+    const sel = denormalizeSelection(activeSelection, vnVideo, selectionOverlay);
     scoutCtx.drawImage(vnVideo, sel.x, sel.y, sel.w, sel.h, 0, 0, 32, 32);
     const pix = scoutCtx.getImageData(0, 0, 32, 32).data;
     const currentData = new Uint32Array(pix.buffer);
@@ -817,7 +829,7 @@ function checkAutoCapture() {
                 
                 // Re-verify conditions after 800ms delay
                 if (getSetting('autoCapture') && !window.isProcessing && EngineManager.isReady()) {
-                    captureFrame(selectionRect);
+                    captureFrame(activeSelection);
                 }
             }, 800);
         }
@@ -878,6 +890,7 @@ function updateDebugThumb(canvas) {
     }
     debugThumb.style.display = 'block';
 }
+window.updateDebugThumb = updateDebugThumb;
 
 /**
  * Helper: scale canvas down to fit bounding box (never upscales).

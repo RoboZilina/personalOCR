@@ -10,8 +10,8 @@
  * @param {Object} rect - Optional selection rectangle, defaults to window.selectionRect
  */
 async function captureFrame(rect = null) {
-    // Hardening v3.4: Null-selection guard (Fixes denormalizeSelection TypeError)
-    if (!rect && !window.selectionRect) return;
+    // Hardening v3.4: Null-selection guard with last-valid fallback
+    if (!rect && !window.selectionRect && !window.lastValidSelectionRect) return;
 
     // Hardening v3.8: Combined readiness and processing lock
     if (window.isProcessing || !window.EngineManager.isReady()) return;
@@ -48,7 +48,16 @@ async function captureFrame(rect = null) {
     window.logTrace(`Capture started. Gen: ${myGen} | Engine: ${pinnedId}`);
 
     const vWidth = window.vnVideo.videoWidth, vHeight = window.vnVideo.videoHeight;
-    const sel = window.denormalizeSelection(rect, window.vnVideo, window.selectionOverlay);
+    const activeRect = rect || window.selectionRect || window.lastValidSelectionRect;
+    if (!activeRect) {
+        releaseLock();
+        return;
+    }
+    const sel = window.denormalizeSelection(activeRect, window.vnVideo, window.selectionOverlay);
+    if (!sel) {
+        releaseLock();
+        return;
+    }
     const cx_ = Math.max(0, Math.floor(sel.x)), cy_ = Math.max(0, Math.floor(sel.y));
     const cw_ = Math.max(1, Math.min(vWidth - cx_, Math.floor(sel.w))), ch_ = Math.max(1, Math.min(vHeight - cy_, Math.floor(sel.h)));
 

@@ -663,6 +663,7 @@ function normalizePaddleText(result) {
 
     return "";
 }
+window.normalizePaddleText = normalizePaddleText;
 
 // Event binding moved to initEventListeners()
 

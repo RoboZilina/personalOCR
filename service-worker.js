@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personalocr-v3.8.5-gold-patch1';
+const CACHE_NAME = 'personalocr-v3.8.5-gold-patch2';
 
 /**
  * Normalize URL to pathname-only for consistent cache keys.
@@ -20,6 +20,10 @@ const ASSETS = [
   '/',
   '/app.js?v=3.8.5',
   '/index.html',
+  '/js/core/capture_pipeline.js?v=3.8.5',
+  '/js/core/engine_manager.js?v=3.8.5',
+  '/js/core/status.js?v=3.8.5',
+  '/js/ui/ui_controller.js?v=3.8.5',
   '/icon-192.png',
   '/icon-512.png',
   '/js/manga/manga_engine.js?v=3.8.5',

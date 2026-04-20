@@ -75,7 +75,7 @@ async function captureFrame(rect = null) {
         if (pinnedId === 'tesseract' && mode === 'multi') {
             const preStart = performance.now();
             const canvases = window.applyTesseractPreprocessing(rawCropCanvas, mode);
-            window.perfStats.preprocess = performance.now() - preStart;
+            if (window.perfStats) window.perfStats.preprocess = performance.now() - preStart;
             const results = [];
 
             // 1. First Pass: Early exit if result is highly confident and clean
@@ -93,7 +93,7 @@ async function captureFrame(rect = null) {
             if (first.confidence > 85 && firstDensity > 5) {
                 window.addOCRResultToUI(first.text);
                 window.updateDebugThumb(canvases[0]);
-                window.perfStats.inference = performance.now() - infStart;
+                if (window.perfStats) window.perfStats.inference = performance.now() - infStart;
                 canvases.forEach(c => { c.width = 0; c.height = 0; });
                 if (window.updatePerformanceStatus) window.updatePerformanceStatus();
                 releaseLock();
@@ -119,7 +119,7 @@ async function captureFrame(rect = null) {
             const bestIndex = findBestMultiPassIndex(results);
             window.updateDebugThumb(canvases[bestIndex]);
             window.showMultiPassOverlay(results, finalText);
-            window.perfStats.inference = performance.now() - infStart;
+            if (window.perfStats) window.perfStats.inference = performance.now() - infStart;
             window.setOCRStatus('ready', '🟢 Analyst Complete');
             canvases.forEach(c => { c.width = 0; c.height = 0; });
             if (window.updatePerformanceStatus) window.updatePerformanceStatus();
@@ -130,7 +130,7 @@ async function captureFrame(rect = null) {
         const lineCount = (typeof window.getSetting === 'function' ? window.getSetting('paddleLineCount') : 1) || 1;
         const preStart = performance.now();
         const canvases = await preprocessForEngine(pinnedId, rawCropCanvas, mode, lineCount);
-        window.perfStats.preprocess = performance.now() - preStart;
+        if (window.perfStats) window.perfStats.preprocess = performance.now() - preStart;
         
         if (window.captureGeneration !== myGen) {
             canvases.forEach(c => { c.width = 0; c.height = 0; });
@@ -173,7 +173,7 @@ async function captureFrame(rect = null) {
                 inferenceResults.push({ text: window.EngineManager.handleError(error), confidence: null });
             }
         }
-        window.perfStats.inference = performance.now() - infStart;
+        if (window.perfStats) window.perfStats.inference = performance.now() - infStart;
 
         if (window.captureGeneration !== myGen) {
             releaseLock();

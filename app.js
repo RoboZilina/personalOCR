@@ -1,5 +1,14 @@
 window.VNOCR_BUILD = "3.8.5";
 window.VNOCR_DEBUG = false; // Set to true to enable high-fidelity lifecycle tracing
+
+const perfStats = {
+    inference: 0,
+    preprocess: 0,
+    lastUpdate: Date.now(),
+    showAdvanced: false
+};
+window.perfStats = perfStats;
+
 const logTrace = (msg) => { if (window.VNOCR_DEBUG) console.log(`[TRACE] ${msg}`); };
 window.logTrace = logTrace;
 
@@ -45,13 +54,6 @@ const getMemoryStats = () => {
     return null;
 };
 
-const perfStats = {
-    inference: 0,
-    preprocess: 0,
-    lastUpdate: Date.now(),
-    showAdvanced: false
-};
-window.perfStats = perfStats;
 /*
   PERSONAL OCR HARDENING PHASE:
   DO NOT MODIFY the following functions during patches:

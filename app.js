@@ -1062,11 +1062,18 @@ function applyPreprocessing(canvas, mode) {
         }
 
         ctx.putImageData(id2, 0, 0);
-        canvas = medianFilter(res);
-        workingId = id2;
+        // Apply median filter and update res canvas
+        const medianFiltered = medianFilter(res);
+        ctx.clearRect(0, 0, res.width, res.height);
+        ctx.drawImage(medianFiltered, 0, 0);
+        workingId = ctx.getImageData(0, 0, res.width, res.height);
     } else if (mode === 'adaptive') {
         workingId = adaptiveThreshold(canvas, ctx, res, { windowDivisor: 8, thresholdFactor: 0.85, preInvert: true, preDenoise: false });
-        canvas = medianFilter(res);
+        // Apply median filter and update res canvas
+        const medianFiltered = medianFilter(res);
+        ctx.clearRect(0, 0, res.width, res.height);
+        ctx.drawImage(medianFiltered, 0, 0);
+        workingId = ctx.getImageData(0, 0, res.width, res.height);
     } else if (mode === 'grayscale') {
         canvas = sharpenCanvas(canvas);
 
@@ -1082,8 +1089,11 @@ function applyPreprocessing(canvas, mode) {
         }
 
         ctx.putImageData(id2, 0, 0);
-        canvas = medianFilter(res);
-        workingId = id2;
+        // Apply median filter and update res canvas
+        const medianFiltered = medianFilter(res);
+        ctx.clearRect(0, 0, res.width, res.height);
+        ctx.drawImage(medianFiltered, 0, 0);
+        workingId = ctx.getImageData(0, 0, res.width, res.height);
     } else if (mode === 'default_mini') {
         workingId = adaptiveThreshold(canvas, ctx, res, { windowDivisor: 10, thresholdFactor: 0.90, preInvert: false, preDenoise: true });
     } else if (mode === 'default_full') {

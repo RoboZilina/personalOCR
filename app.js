@@ -518,14 +518,7 @@ function applyPaddlePreprocessing(cropCanvas, lineCount) {
     });
 }
 
-if (typeof modeSelector !== 'undefined' && modeSelector) {
-    modeSelector.addEventListener('change', () => {
-        applyUIToSettings();
-        // if (getSetting('debug')) console.debug('[Mode Select] Mode updated:', modeSelector.value);
-        removeMultiPassOverlay();
-        setOCRStatus('ready', '');
-    });
-}
+// Mode selector event listener moved to initEventListeners() for proper initialization timing
 
 
 
@@ -1095,6 +1088,10 @@ function applyPreprocessing(canvas, mode) {
         workingId = adaptiveThreshold(canvas, ctx, res, { windowDivisor: 10, thresholdFactor: 0.90, preInvert: false, preDenoise: true });
     } else if (mode === 'default_full') {
         workingId = adaptiveThreshold(canvas, ctx, res, { windowDivisor: 8, thresholdFactor: 0.80, preInvert: true, preDenoise: true });
+    } else {
+        // Fallback for unexpected modes - use default_mini
+        console.warn(`applyPreprocessing: Unknown mode "${mode}", falling back to default_mini`);
+        workingId = adaptiveThreshold(canvas, ctx, res, { windowDivisor: 10, thresholdFactor: 0.90, preInvert: false, preDenoise: true });
     }
 
     // === UNIFIED CLEANUP STEP ===
@@ -2076,6 +2073,16 @@ function initEventListeners() {
             setSetting('upscaleFactor', val);
             if (upscaleVal) upscaleVal.textContent = val.toFixed(1);
         };
+    }
+
+    // Mode selector
+    if (modeSelector) {
+        modeSelector.addEventListener('change', () => {
+            applyUIToSettings();
+            // if (getSetting('debug')) console.debug('[Mode Select] Mode updated:', modeSelector.value);
+            removeMultiPassOverlay();
+            setOCRStatus('ready', '');
+        });
     }
 
     // 5. Sidebar Menu (Hamburger Logic)

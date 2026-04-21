@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preprocessing Diagnostic Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .test-container {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #2a2a2a;
+        }
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .success {
+            background: #1a3c1a;
+            border: 1px solid #2a7a2a;
+        }
+        .error {
+            background: #3c1a1a;
+            border: 1px solid #7a2a2a;
+        }
+        .warning {
+            background: #3c3c1a;
+            border: 1px solid #7a7a2a;
+        }
+        canvas {
+            border: 1px solid #666;
+            margin: 5px;
+            background: white;
+        }
+        .canvas-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .mode-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Preprocessing Diagnostic Test</h1>
+    <p>Testing all preprocessing modes for potential issues...</p>
+    
+    <div id="test-results"></div>
+    
+    <script>
+        // Create a test image (simple black text on white background)
+        function createTestCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 200;
+            canvas.height = 100;
+            const ctx = canvas.getContext('2d');
+            
+            // White background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Black text
+            ctx.fillStyle = 'black';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Test OCR', canvas.width/2, canvas.height/2);
+            
+            return canvas;
+        }
+        
+        // Load the preprocessing functions from app.js
+        async function loadPreprocessingFunctions() {
+            try {
+                // We'll test the functions directly since they're in the global scope
+                // when app.js is loaded
+                const testCanvas = createTestCanvas();
+                const modes = [
+                    'default_mini',
+                    'default_full', 
+                    'adaptive',
+                    'binarize',
+                    'grayscale',
+                    'raw'
+                ];
+                
+                const results = [];
+                
+                for (const mode of modes) {
+                    try {
+                        console.log(`Testing mode: ${mode}`);
+                        
+                        if (typeof window.applyPreprocessing === 'function') {
+                            const startTime = performance.now();
+                            const result = window.applyPreprocessing(testCanvas, mode);
+                            const endTime = performance.now();
+                            
+                            if (result && result.width > 0 && result.height > 0) {
+                                results.push({
+                                    mode,
+                                    success: true,
+                                    time: endTime - startTime,
+                                    canvas: result,
+                                    error: null
+                                });
+                            } else {
+                                results.push({
+                                    mode,
+                                    success: false,
+                                    time: 0,
+                                    canvas: null,
+                                    error: 'Invalid canvas returned'
+                                });
+                            }
+                        } else {
+                            results.push({
+                                mode,
+                                success: false,
+                                time: 0,
+                                canvas: null,
+                                error: 'applyPreprocessing function not found'
+                            });
+                        }
+                    } catch (err) {
+                        results.push({
+                            mode,
+                            success: false,
+                            time: 0,
+                            canvas: null,
+                            error: err.message
+                        });
+                    }
+                }
+                
+                return results;
+            } catch (err) {
+                console.error('Error in loadPreprocessingFunctions:', err);
+                return [];
+            }
+        }
+        
+        // Display test results
+        function displayResults(results) {
+            const container = document.getElementById('test-results');
+            
+            results.forEach(result => {
+                const testDiv = document.createElement('div');
+                testDiv.className = 'test-container';
+                
+                const statusClass = result.success ? 'success' : 'error';
+                const statusText = result.success ? '✓ PASS' : '✗ FAIL';
+                
+                testDiv.innerHTML = `
+                    <div class="mode-label">Mode: ${result.mode}</div>
+                    <div class="test-result ${statusClass}">
+                        <strong>${statusText}</strong> - ${result.time.toFixed(2)}ms
+                        ${result.error ? `<br>Error: ${result.error}` : ''}
+                    </div>
+                `;
+                
+                if (result.success && result.canvas) {
+                    const canvasGrid = document.createElement('div');
+                    canvasGrid.className = 'canvas-grid';
+                    
+                    const originalLabel = document.createElement('div');
+                    originalLabel.textContent = 'Original:';
+                    canvasGrid.appendChild(originalLabel);
+                    
+                    const originalCanvas = createTestCanvas();
+                    canvasGrid.appendChild(originalCanvas);
+                    
+                    const resultLabel = document.createElement('div');
+                    resultLabel.textContent = 'Processed:';
+                    canvasGrid.appendChild(resultLabel);
+                    
+                    canvasGrid.appendChild(result.canvas);
+                    
+                    testDiv.appendChild(canvasGrid);
+                }
+                
+                container.appendChild(testDiv);
+            });
+            
+            // Summary
+            const passed = results.filter(r => r.success).length;
+            const total = results.length;
+            const summary = document.createElement('div');
+            summary.className = 'test-container';
+            summary.innerHTML = `<h3>Summary: ${passed}/${total} modes passed</h3>`;
+            container.insertBefore(summary, container.firstChild);
+        }
+        
+        // Run tests when page loads
+        window.addEventListener('load', async () => {
+            console.log('Starting preprocessing tests...');
+            
+            // First, load app.js to get the preprocessing functions
+            const script = document.createElement('script');
+            script.src = 'app.js?v=3.8.5';
+            script.onload = async () => {
+                console.log('app.js loaded, running tests...');
+                // Wait a bit for functions to be available
+                setTimeout(async () => {
+                    const results = await loadPreprocessingFunctions();
+                    displayResults(results);
+                }, 100);
+            };
+            script.onerror = () => {
+                const container = document.getElementById('test-results');
+                container.innerHTML = '<div class="test-container error">Failed to load app.js</div>';
+            };
+            
+            document.head.appendChild(script);
+        });
+    </script>
+</body>
+</html>

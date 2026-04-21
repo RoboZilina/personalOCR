@@ -262,40 +262,9 @@ async function captureFrame(rect = null) {
 async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
     window.logTrace('preprocessForEngine called with engineId = ' + engineId);
     
-    // Look up explicit engine instance by ID if available
-    let engineToUse = window.EngineManager.getEngineInstance();
-    if (engineId && typeof window.EngineManager.getEngineMetadata === 'function') {
-        const meta = window.EngineManager.getEngineMetadata(engineId);
-        if (meta && meta.instance) engineToUse = meta.instance;
-    }
-    
-    if (engineToUse && typeof engineToUse.preprocess === 'function') {
-        try {
-            return await engineToUse.preprocess(rawCanvas, mode, lineCount);
-        } catch (err) {
-            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Instance preprocess failed, trying registry fallback:", err);
-        }
-    }
-    
-    // Fallback 1: Try registry entry preprocess
-    const registry = window.VNOCR_ENGINES || {};
-    const entry = registry[engineId];
-    if (entry && typeof entry.preprocess === 'function') {
-        try {
-            return await entry.preprocess(rawCanvas, mode, lineCount);
-        } catch (err) {
-            if (window.VNOCR_DEBUG) console.warn("[ENGINE] Registry preprocess failed, using raw canvas fallback:", err);
-        }
-    }
-    
-    // Final Fallback: Clone raw canvas to prevent pipeline from destroying original
-    if (window.VNOCR_DEBUG) console.debug("[ENGINE] No preprocess available, returning cloned canvas");
-    const cloned = document.createElement('canvas');
-    cloned.width = rawCanvas.width;
-    cloned.height = rawCanvas.height;
-    cloned.getContext('2d').drawImage(rawCanvas, 0, 0);
-    return [cloned];
-    // Ensure we never return an empty array
+    // Delegate to EngineManager.preprocess() which handles engine-specific preprocessing
+    // This ensures Tesseract preprocessing (applyTesseractPreprocessing) is called via the engine registry
+    return await window.EngineManager.preprocess(rawCanvas, mode, lineCount);
 }
 
 /**

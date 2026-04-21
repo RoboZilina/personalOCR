@@ -11,6 +11,10 @@ import { getSetting } from '../../settings.js';
 // Progress Pill v2: Unified State Machine (Gold v3.8)
 // ==========================================
 let statusSettleTimer = null;
+// Clean up timer on page unload to prevent memory leaks
+window.addEventListener('beforeunload', () => {
+    if (statusSettleTimer) clearTimeout(statusSettleTimer);
+});
 
 /**
  * Updates the capture button state based on engine readiness and processing status.
@@ -61,7 +65,9 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
 
     // 3. Settle Logic: Prevent rapid-fire READY flickers
     if (state === STATUS.READY) {
-        if (statusSettleTimer) return; // Wait for the existing timer
+        if (statusSettleTimer) {
+            clearTimeout(statusSettleTimer); // Cancel pending timer
+        }
         statusSettleTimer = setTimeout(() => {
             applyStatusStage(STATUS.READY, text || window.EngineManager.getReadyStatus(), null);
             statusSettleTimer = null;

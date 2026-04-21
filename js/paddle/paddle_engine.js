@@ -91,9 +91,14 @@ export class PaddleOCR {
         if (this.loadPromise) return this.loadPromise;
 
         this.loadPromise = (async () => {
-            await this.loadModels();
-            this.isLoaded = true;
-            return this;
+            try {
+                await this.loadModels();
+                this.isLoaded = true;
+                return this;
+            } catch (err) {
+                this.loadPromise = null; // Clear promise on failure
+                throw err;
+            }
         })();
 
         return this.loadPromise;

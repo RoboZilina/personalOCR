@@ -191,7 +191,7 @@ export function applyUIToSettings() {
     const autoToggle = document.querySelector("#auto-capture-toggle");
     if (autoToggle) currentSettings.autoCapture = autoToggle.checked;
 
-    const warningCheckbox = document.querySelector("#heavy-warning-checkbox");
+    const warningCheckbox = document.querySelector("#banner-nocall-checkbox");
     if (warningCheckbox) currentSettings.showHeavyWarning = !warningCheckbox.checked;
 
     // Theme and history visibility are usually toggled via buttons, 

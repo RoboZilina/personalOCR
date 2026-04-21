@@ -74,15 +74,15 @@ self.addEventListener('install', (event) => {
       .then((cache) => cache.addAll(ASSETS).then(() => cache))
       .then((cache) => cache.keys().then(keys => ({ cache, keys })))
       .then(({ cache, keys }) => {
-        // Integrity check: verify cached keys match normalized assets
-        const cachedPaths = keys.map(r => new URL(r.url).pathname);
+        // Integrity check: compare normalized paths (ignore query strings)
+        const cachedPaths = keys.map(r => normalizeUrl(r.url));
         const missing = NORMALIZED_ASSETS.filter(a => a !== '/' && !cachedPaths.includes(a));
         const extra = cachedPaths.filter(c => c !== '/' && !NORMALIZED_ASSETS.includes(c));
         if (missing.length > 0) {
           console.warn('[SW:INSTALL] Cache mismatch - missing assets:', missing);
-          // Auto-heal: re-populate missing assets
+          // Auto-heal: re-populate missing assets (with original query strings)
           console.log('[SW:INSTALL] Auto-healing cache with missing assets...');
-          return cache.addAll(missing);
+          return cache.addAll(ASSETS.filter(a => missing.includes(normalizeUrl(a))));
         }
         if (extra.length > 0) {
           console.warn('[SW:INSTALL] Cache mismatch - unexpected extra assets:', extra);
@@ -153,12 +153,16 @@ self.addEventListener('fetch', (event) => {
         }
         // Return a minimal offline response for navigation requests
         if (event.request.mode === 'navigate') {
-          return new Response('Offline - App not cached', { 
-            status: 503, 
-            headers: { 'Content-Type': 'text/plain' } 
+          return new Response('Offline - App not cached', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' }
           });
         }
-        return null;
+        // Return a generic error response for any other request (avoid null)
+        return new Response('Network error', {
+          status: 408,
+          headers: { 'Content-Type': 'text/plain' }
+        });
       });
     })
   );

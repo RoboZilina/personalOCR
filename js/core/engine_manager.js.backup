@@ -35,7 +35,6 @@ const EngineManager = ((engines) => {
             if (meta.instance) {
                 try {
                     meta.instance.dispose?.();
-                    meta.instance = null; // Clear reference
                 } catch (e) {
                     console.warn(`[ENGINE] dispose failed for ${id}`, e);
                 }
@@ -257,14 +256,20 @@ const EngineManager = ((engines) => {
      * Atomic update: only sets currentEngineId after successful load.
      */
     async function switchEngine(registryEntry) {
+        // Safety check: validate registryEntry
+        if (!registryEntry || typeof registryEntry !== 'object') {
+            console.warn('[ENGINE] Invalid registryEntry:', registryEntry);
+            return;
+        }
+        
         const id = registryEntry.id;
-
+        
         // Safety check: validate engine ID
         if (!id || typeof id !== 'string') {
             console.warn('[ENGINE] Invalid engine ID:', id);
             return;
         }
-        
+
         if (switchingLock) {
             if (window.VNOCR_DEBUG) console.warn("[TRACE] Ignored overlapping engine switch");
             return;
@@ -441,137 +446,4 @@ const EngineManager = ((engines) => {
         await Promise.allSettled(
             Array.from(engineMetadata.entries()).map(async ([id, meta]) => {
                 const engine = meta?.instance;
-                if (engine && typeof engine.dispose === 'function') {
-                    try {
-                        await engine.dispose();
-                        if (window.VNOCR_DEBUG) console.debug(`[TRACE] Engine Disposed: ${id}`);
-                    } catch (err) {
-                        console.error(`Engine dispose error (${id}):`, err);
-                    }
-                }
-                engineMetadata.set(id, { instance: null, state: 'not_loaded', loadPromise: null });
-            })
-        );
-        currentEngine = null;
-        currentEngineId = null;
-        currentInfo = { id: null, capabilities: {} };
-        isReady = false;
-        notifyStatus('idle', 'All engines cleared');
-    }
-
-    // Unified OCR entry point
-    async function runOCR(canvas, options = {}) {
-        // Gold v3.8: Support instance pinning for multi-slice stability
-        let engine = currentEngine;
-        let engineId = currentEngineId || 'tesseract';
-        
-        // If options contains engineInstance (internal pin), use it directly
-        if (options && options.engineInstance) {
-            engine = options.engineInstance;
-        }
-        
-        // If options contains explicit engineId, use that for loading
-        if (options && typeof options.engineId === 'string') {
-            engineId = options.engineId;
-        }
-
-        // Auto-recovery: if no engine loaded, try to load the target engine
-        if (!engine || typeof engine.recognize !== 'function') {
-            if (window.VNOCR_DEBUG) console.debug(`[ENGINE] runOCR: Engine not ready, attempting auto-load for ${engineId}`);
-            try {
-                // Check if switching is in progress to avoid race conditions
-                if (switchingLock) {
-                    throw new Error('Engine switch in progress - please retry');
-                }
-                engine = await getOrLoadEngine(engineId);
-                // Update current engine if we're loading the current one
-                if (engineId === currentEngineId) {
-                    currentEngine = engine;
-                }
-            } catch (loadErr) {
-                console.error(`[ENGINE] Auto-load failed for ${engineId}:`, loadErr);
-                notifyStatus(STATUS.ERROR, `Load failed: ${loadErr.message}`, null, engineId);
-                throw new Error(`Engine load failed: ${loadErr.message}`);
-            }
-        }
-
-        if (!engine || typeof engine.recognize !== 'function') {
-            notifyStatus(STATUS.ERROR, 'No engine available', null, engineId);
-            throw new Error('No engine available');
-        }
-
-        try {
-            notifyStatus(STATUS.PROCESSING, '🟡 Processing...', null, engineId);
-            const result = await engine.recognize(canvas, (typeof options === 'object' ? options : {}));
-            return result;
-        } catch (err) {
-            notifyStatus(STATUS.ERROR, 'OCR failed', null, engineId);
-            throw err;
-        }
-    }
-
-
-
-    // Unified preprocessing entry point
-    async function preprocess(canvas, mode, lineCount) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.preprocess === 'function') {
-            return await entry.preprocess(canvas, mode, lineCount);
-        }
-        return [canvas];
-    }
-
-    // Unified post-processing entry point
-    function postprocess(results) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.postprocess === 'function') {
-            return entry.postprocess(results);
-        }
-        return results.join(' ').trim();
-    }
-
-    function getReadyStatus() {
-        const id = currentEngineId || 'tesseract';
-        const entry = engines[id];
-        return entry?.readyStatus || '🟢 OCR Ready';
-    }
-
-    function handleError(error) {
-        const id = currentEngineId;
-        const entry = engines[id];
-        if (entry && typeof entry.handleError === 'function') {
-            return entry.handleError(error);
-        }
-        console.error("Unhandleable error:", error);
-        return "[OCR Error]";
-    }
-
-    // Initialize Defaults
-    engineMetadata.set('tesseract', { instance: null, state: 'idle', loadPromise: null });
-
-    return {
-        onReady, onLoading, onError, onStatusChange,
-        switchEngine, preloadCoreEngines, disposeAllEngines, disposeEngine,
-        getOrLoadEngine, evictOtherEngines, loadEngineInWorker, rehydrateEngine, loadEngineMainThread,
-        runOCR, preprocess, postprocess, notifyStatus, _notifyStatus: notifyStatus,
-        isReady: () => isReady,
-        getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
-        getInfo: () => currentInfo || { id: null, capabilities: {} },
-        getEngineInstance: () => currentEngine,
-        getReadyStatus,
-        emitError: (err) => emit('error', err),
-        handleError: (err) => {
-            console.error("[ENGINE-ERROR]", err);
-            return "🔴 OCR ERROR";
-        }
-    };
-
-})(engines);
-
-return EngineManager;
-
-}
-
-export { createEngineManager };
+                if (engine

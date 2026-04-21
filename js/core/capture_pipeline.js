@@ -39,6 +39,12 @@ async function captureFrame(rect = null) {
     
     window.isProcessing = true;
     
+    // Check generation before any processing
+    if (window.captureGeneration !== myGen) {
+        releaseLock();
+        return;
+    }
+    
     // Engine Pinning: Lock current instance and ID to ensure consistency throughout the slice cycle
     const pinnedEngine = window.EngineManager.getEngineInstance();
     const pinnedInfo = window.EngineManager.getInfo() || { id: null, capabilities: {} };
@@ -78,16 +84,16 @@ async function captureFrame(rect = null) {
             if (window.perfStats) window.perfStats.preprocess = performance.now() - preStart;
             const results = [];
 
-            // 1. First Pass: Early exit if result is highly confident and clean
-            const infStart = performance.now();
-            const first = await window.EngineManager.runOCR(canvases[0], { engineInstance: pinnedEngine });
-            
-            // Generation Check (Critical for preventing UI ghosting)
+            // Generation Check before first OCR pass
             if (window.captureGeneration !== myGen) {
                 canvases.forEach(c => { c.width = 0; c.height = 0; });
                 releaseLock();
                 return;
             }
+
+            // 1. First Pass: Early exit if result is highly confident and clean
+            const infStart = performance.now();
+            const first = await window.EngineManager.runOCR(canvases[0], { engineInstance: pinnedEngine });
 
             const firstDensity = window.scoreJapaneseDensity(first.text);
             if (first.confidence > 85 && firstDensity > 5) {
@@ -289,6 +295,7 @@ async function preprocessForEngine(engineId, rawCanvas, mode, lineCount) {
     cloned.height = rawCanvas.height;
     cloned.getContext('2d').drawImage(rawCanvas, 0, 0);
     return [cloned];
+    // Ensure we never return an empty array
 }
 
 /**

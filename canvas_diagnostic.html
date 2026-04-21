@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Diagnostic Tool</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        .stage { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .canvas-container { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+        canvas { border: 1px solid #666; background: #f0f0f0; }
+        .info { background: #e8f4f8; padding: 10px; margin: 5px 0; }
+        .error { background: #ffe8e8; padding: 10px; margin: 5px 0; }
+        .success { background: #e8ffe8; padding: 10px; margin: 5px 0; }
+        button { margin: 5px; padding: 8px 15px; }
+        .controls { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>Canvas Preprocessing Diagnostic</h1>
+    <p>This tool will help diagnose what's happening with canvas preprocessing.</p>
+    
+    <div class="controls">
+        <button id="test-preprocessing">Test Preprocessing Functions</button>
+        <button id="inspect-appjs">Inspect applyPreprocessing Function</button>
+        <button id="create-test-canvas">Create Test Canvas</button>
+        <select id="mode-select">
+            <option value="default_mini">Default Mini</option>
+            <option value="default_full">Default Full</option>
+            <option value="adaptive">Adaptive</option>
+            <option value="binarize">Binarize</option>
+            <option value="grayscale">Grayscale</option>
+            <option value="raw">Raw</option>
+            <option value="multi">Multi</option>
+            <option value="last_resort">Last Resort</option>
+        </select>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        // Create a test canvas with some text
+        function createTestCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 300;
+            canvas.height = 100;
+            const ctx = canvas.getContext('2d');
+            
+            // White background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Some test text
+            ctx.fillStyle = 'black';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Test OCR Text 123', canvas.width/2, canvas.height/2);
+            
+            // Add some noise
+            for (let i = 0; i < 100; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const gray = Math.random() * 100;
+                ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+                ctx.fillRect(x, y, 2, 2);
+            }
+            
+            return canvas;
+        }
+        
+        // Display canvas with info
+        function displayCanvas(canvas, title, container) {
+            const div = document.createElement('div');
+            div.innerHTML = `<strong>${title}</strong><br>Size: ${canvas.width}×${canvas.height}`;
+            
+            const canvasCopy = document.createElement('canvas');
+            canvasCopy.width = canvas.width;
+            canvasCopy.height = canvas.height;
+            canvasCopy.getContext('2d').drawImage(canvas, 0, 0);
+            
+            div.appendChild(canvasCopy);
+            container.appendChild(div);
+            return canvasCopy;
+        }
+        
+        // Test 1: Check if applyPreprocessing function exists and works
+        async function testPreprocessing() {
+            results.innerHTML = '';
+            const stage = document.createElement('div');
+            stage.className = 'stage';
+            stage.innerHTML = '<h2>Testing applyPreprocessing Function</h2>';
+            results.appendChild(stage);
+            
+            const testCanvas = createTestCanvas();
+            const canvasContainer = document.createElement('div');
+            canvasContainer.className = 'canvas-container';
+            stage.appendChild(canvasContainer);
+            
+            displayCanvas(testCanvas, 'Original Canvas', canvasContainer);
+            
+            // Check if applyPreprocessing exists
+            if (typeof window.applyPreprocessing !== 'function') {
+                const error = document.createElement('div');
+                error.className = 'error';
+                error.innerHTML = 'ERROR: applyPreprocessing function not found on window object';
+                stage.appendChild(error);
+                return;
+            }
+            
+            const info = document.createElement('div');
+            info.className = 'info';
+            info.innerHTML = 'applyPreprocessing function found. Testing with different modes...';
+            stage.appendChild(info);
+            
+            // Test each mode
+            const modes = ['default_mini', 'default_full', 'adaptive', 'binarize', 'grayscale', 'raw'];
+            const modeSelect = document.getElementById('mode-select');
+            const selectedMode = modeSelect.value;
+            
+            try {
+                const startTime = performance.now();
+                const result = window.applyPreprocessing(testCanvas, selectedMode);
+                const endTime = performance.now();
+                
+                if (!result) {
+                    const error = document.createElement('div');
+                    error.className = 'error';
+                    error.innerHTML = `ERROR: applyPreprocessing returned null/undefined for mode "${selectedMode}"`;
+                    stage.appendChild(error);
+                } else if (!result.width || !result.height) {
+                    const error = document.createElement('div');
+                    error.className = 'error';
+                    error.innerHTML = `ERROR: applyPreprocessing returned invalid canvas (width: ${result.width}, height: ${result.height}) for mode "${selectedMode}"`;
+                    stage.appendChild(error);
+                } else {
+                    const success = document.createElement('div');
+                    success.className = 'success';
+                    success.innerHTML = `SUCCESS: applyPreprocessing returned canvas ${result.width}×${result.height} in ${(endTime - startTime).toFixed(2)}ms for mode "${selectedMode}"`;
+                    stage.appendChild(success);
+                    
+                    displayCanvas(result, `Processed (${selectedMode})`, canvasContainer);
+                    
+                    // Check pixel data
+                    const ctx = result.getContext('2d');
+                    const imageData = ctx.getImageData(0, 0, result.width, result.height);
+                    const data = imageData.data;
+                    
+                    // Analyze pixel values
+                    let whitePixels = 0, blackPixels = 0, grayPixels = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const r = data[i];
+                        const g = data[i + 1];
+                        const b = data[i + 2];
+                        
+                        if (r === 255 && g === 255 && b === 255) whitePixels++;
+                        else if (r === 0 && g === 0 && b === 0) blackPixels++;
+                        else grayPixels++;
+                    }
+                    
+                    const totalPixels = data.length / 4;
+                    const analysis = document.createElement('div');
+                    analysis.className = 'info';
+                    analysis.innerHTML = `
+                        Pixel Analysis:<br>
+                        - White pixels: ${whitePixels} (${(whitePixels/totalPixels*100).toFixed(1)}%)<br>
+                        - Black pixels: ${blackPixels} (${(blackPixels/totalPixels*100).toFixed(1)}%)<br>
+                        - Gray pixels: ${grayPixels} (${(grayPixels/totalPixels*100).toFixed(1)}%)<br>
+                        - Total pixels: ${totalPixels}
+                    `;
+                    stage.appendChild(analysis);
+                }
+            } catch (err) {
+                const error = document.createElement('div');
+                error.className = 'error';
+                error.innerHTML = `ERROR in applyPreprocessing: ${err.message}<br>${err.stack}`;
+                stage.appendChild(error);
+            }
+        }
+        
+        // Test 2: Inspect the applyPreprocessing function code
+        function inspectApplyPreprocessing() {
+            results.innerHTML = '';
+            const stage = document.createElement('div');
+            stage.className = 'stage';
+            stage.innerHTML = '<h2>Inspecting applyPreprocessing Function</h2>';
+            results.appendChild(stage);
+            
+            if (typeof window.applyPreprocessing !== 'function') {
+                const error = document.createElement('div');
+                error.className = 'error';
+                error.innerHTML = 'applyPreprocessing function not found';
+                stage.appendChild(error);
+                return;
+            }
+            
+            const funcStr = window.applyPreprocessing.toString();
+            const info = document.createElement('div');
+            info.className = 'info';
+            info.innerHTML = `
+                <strong>Function found:</strong><br>
+                <pre style="background:#f5f5f5;padding:10px;overflow:auto;max-height:300px;">${funcStr.substring(0, 2000)}${funcStr.length > 2000 ? '...' : ''}</pre>
+                <br>Length: ${funcStr.length} characters
+            `;
+            stage.appendChild(info);
+            
+            // Check for key patterns
+            const checks = document.createElement('div');
+            checks.className = 'info';
+            
+            const patterns = [
+                { name: 'Has fallback else clause', pattern: /\} else \{/ },
+                { name: 'Uses upscaleSlider', pattern: /upscaleSlider/ },
+                { name: 'Uses lumaBT601', pattern: /lumaBT601/ },
+                { name: 'Has unified cleanup step', pattern: /UNIFIED CLEANUP STEP/ },
+                { name: 'Handles raw mode', pattern: /mode === 'raw'/ },
+                { name: 'Handles default_mini', pattern: /mode === 'default_mini'/ },
+                { name: 'Handles default_full', pattern: /mode === 'default_full'/ },
+                { name: 'Handles adaptive', pattern: /mode === 'adaptive'/ },
+                { name: 'Handles binarize', pattern: /mode === 'binarize'/ },
+                { name: 'Handles grayscale', pattern: /mode === 'grayscale'/ },
+            ];
+            
+            let checksHTML = '<strong>Code Pattern Checks:</strong><br>';
+            patterns.forEach(p => {
+                const found = p.pattern.test(funcStr);
+                checksHTML += `${found ? '✓' : '✗'} ${p.name}<br>`;
+            });
+            
+            checks.innerHTML = checksHTML;
+            stage.appendChild(checks);
+        }
+        
+        // Test 3: Create and display test canvas
+        function createAndDisplayTestCanvas() {
+            results.innerHTML = '';
+            const stage = document.createElement('div');
+            stage.className = 'stage';
+            stage.innerHTML = '<h2>Test Canvas</h2>';
+            results.appendChild(stage);
+            
+            const testCanvas = createTestCanvas();
+            const canvasContainer = document.createElement('div');
+            canvasContainer.className = 'canvas-container';
+            stage.appendChild(canvasContainer);
+            
+            displayCanvas(testCanvas, 'Test Canvas (300×100)', canvasContainer);
+            
+            // Show pixel data
+            const ctx = testCanvas.getContext('2d');
+            const imageData = ctx.getImageData(0, 0, testCanvas.width, testCanvas.height);
+            const data = imageData.data;
+            
+            const analysis = document.createElement('div');
+            analysis.className = 'info';
+            analysis.innerHTML = `
+                <strong>Canvas Analysis:</strong><br>
+                - Width: ${testCanvas.width}px<br>
+                - Height: ${testCanvas.height}px<br>
+                - Total pixels: ${data.length / 4}<br>
+                - First pixel (top-left): RGB(${data[0]}, ${data[1]}, ${data[2]})<br>
+                - Data length: ${data.length} (${data.length / 1024} KB)
+            `;
+            stage.appendChild(analysis);
+        }
+        
+        // Event listeners
+        document.getElementById('test-preprocessing').addEventListener('click', testPreprocessing);
+        document.getElementById('inspect-appjs').addEventListener('click', inspectApplyPreprocessing);
+        document.getElementById('create-test-canvas').addEventListener('click', createAndDisplayTestCanvas);
+        
+        // Initial message
+        const initial = document.createElement('div');
+        initial.className = 'info';
+        initial.innerHTML = `
+            <strong>Instructions:</strong><br>
+            1. First load app.js in this page by opening the main app<br>
+            2. Use "Test Preprocessing Functions" to test applyPreprocessing<br>
+            3. Select a mode from the dropdown to test specific preprocessing<br>
+            4. Check console for any JavaScript errors
+        `;
+        results.appendChild(initial);
+    </script>
+</body>
+</html>

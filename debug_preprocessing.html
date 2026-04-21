@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Preprocessing</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        canvas { border: 1px solid black; margin: 10px; }
+        .row { display: flex; margin: 20px 0; }
+        .col { margin: 0 10px; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>Debug Preprocessing Pipeline</h1>
+    
+    <div class="row">
+        <div class="col">
+            <h3>Original</h3>
+            <canvas id="original" width="200" height="100"></canvas>
+        </div>
+        <div class="col">
+            <h3>Processed</h3>
+            <canvas id="processed" width="200" height="100"></canvas>
+        </div>
+    </div>
+    
+    <div>
+        <button onclick="testPreprocessing()">Test applyPreprocessing</button>
+        <select id="mode">
+            <option value="default_mini">default_mini</option>
+            <option value="default_full">default_full</option>
+            <option value="adaptive">adaptive</option>
+            <option value="binarize">binarize</option>
+            <option value="grayscale">grayscale</option>
+            <option value="raw">raw</option>
+        </select>
+    </div>
+    
+    <div id="output" style="margin-top: 20px;"></div>
+    
+    <script>
+        // Create test canvas
+        const originalCanvas = document.getElementById('original');
+        const ctx = originalCanvas.getContext('2d');
+        
+        // Draw test pattern
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, originalCanvas.width, originalCanvas.height);
+        
+        ctx.fillStyle = 'black';
+        ctx.font = '20px Arial';
+        ctx.fillText('Test 123', 50, 50);
+        
+        // Add some noise
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * originalCanvas.width;
+            const y = Math.random() * originalCanvas.height;
+            const gray = Math.random() * 150;
+            ctx.fillStyle = `rgb(${gray}, ${gray}, ${gray})`;
+            ctx.fillRect(x, y, 3, 3);
+        }
+        
+        // Mock some of the preprocessing functions for testing
+        function lr_upscale(canvas, f) {
+            const res = document.createElement('canvas');
+            res.width = canvas.width * f;
+            res.height = canvas.height * f;
+            const ctx = res.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(canvas, 0, 0, res.width, res.height);
+            return res;
+        }
+        
+        function lr_addPadding(canvas, pad) {
+            const res = document.createElement('canvas');
+            res.width = canvas.width + pad * 2;
+            res.height = canvas.height + pad * 2;
+            const ctx = res.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, res.width, res.height);
+            ctx.drawImage(canvas, pad, pad);
+            return res;
+        }
+        
+        function lumaBT601(r, g, b) {
+            return 0.299 * r + 0.587 * g + 0.114 * b;
+        }
+        
+        // Simplified applyPreprocessing for debugging
+        function debugApplyPreprocessing(canvas, mode) {
+            const output = document.getElementById('output');
+            output.innerHTML = `<h3>Debugging mode: ${mode}</h3>`;
+            
+            // Log 1: Original canvas state
+            const originalData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+            output.innerHTML += `<p>Original: ${canvas.width}×${canvas.height}, first pixel: RGB(${originalData.data[0]}, ${originalData.data[1]}, ${originalData.data[2]})</p>`;
+            
+            if (mode === 'raw') {
+                const result = lr_addPadding(canvas, 10);
+                output.innerHTML += `<p>Raw mode: returned padded canvas ${result.width}×${result.height}</p>`;
+                return result;
+            }
+            
+            // Simulate upscaling
+            const scale = 2;
+            const upscaled = lr_upscale(canvas, scale);
+            output.innerHTML += `<p>Upscaled to: ${upscaled.width}×${upscaled.height} (scale: ${scale})</p>`;
+            
+            // Create result canvas
+            const res = document.createElement('canvas');
+            res.width = upscaled.width;
+            res.height = upscaled.height;
+            const resCtx = res.getContext('2d');
+            resCtx.drawImage(upscaled, 0, 0);
+            
+            // Get image data
+            const id = resCtx.getImageData(0, 0, res.width, res.height);
+            
+            // Simple threshold for testing
+            const d = id.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const gray = (d[i] + d[i + 1] + d[i + 2]) / 3;
+                const threshold = 128;
+                const value = gray > threshold ? 255 : 0;
+                d[i] = d[i + 1] = d[i + 2] = value;
+            }
+            
+            resCtx.putImageData(id, 0, 0);
+            
+            const padded = lr_addPadding(res, 10);
+            output.innerHTML += `<p>Processed: ${res.width}×${res.height}, Padded: ${padded.width}×${padded.height}</p>`;
+            
+            // Check final pixel values
+            const finalCtx = padded.getContext('2d');
+            const finalData = finalCtx.getImageData(0, 0, padded.width, padded.height);
+            let whiteCount = 0, blackCount = 0;
+            for (let i = 0; i < finalData.data.length; i += 4) {
+                if (finalData.data[i] === 255) whiteCount++;
+                else if (finalData.data[i] === 0) blackCount++;
+            }
+            output.innerHTML += `<p>Final pixels: White=${whiteCount}, Black=${blackCount}, Total=${finalData.data.length / 4}</p>`;
+            
+            return padded;
+        }
+        
+        function testPreprocessing() {
+            const mode = document.getElementById('mode').value;
+            const processedCanvas = document.getElementById('processed');
+            const processedCtx = processedCanvas.getContext('2d');
+            
+            // Clear processed canvas
+            processedCtx.fillStyle = 'white';
+            processedCtx.fillRect(0, 0, processedCanvas.width, processedCanvas.height);
+            
+            try {
+                const result = debugApplyPreprocessing(originalCanvas, mode);
+                
+                // Draw result
+                processedCtx.drawImage(result, 0, 0, processedCanvas.width, processedCanvas.height);
+                
+                // Also check if window.applyPreprocessing exists
+                if (typeof window.applyPreprocessing === 'function') {
+                    document.getElementById('output').innerHTML += `<p style="color:green">✓ window.applyPreprocessing function exists</p>`;
+                } else {
+                    document.getElementById('output').innerHTML += `<p style="color:red">✗ window.applyPreprocessing function NOT found</p>`;
+                }
+            } catch (err) {
+                document.getElementById('output').innerHTML += `<p style="color:red">Error: ${err.message}</p>`;
+                console.error(err);
+            }
+        }
+        
+        // Initial test
+        testPreprocessing();
+    </script>
+</body>
+</html>

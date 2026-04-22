@@ -645,6 +645,54 @@ body.light-theme .video-stage { background: radial-gradient(circle, #f0f0f0 0%, 
 body.light-theme .history-sidebar { background: #fdfdfd; }
 body.light-theme .latest-text-content { color: var(--text); text-shadow: none; }
 body.light-theme .ui-select, body.light-theme .status-pill { background: #fff; color: var(--text); }
+
+/* Status-pill state overrides for light theme */
+body.light-theme .status-pill.loading,
+body.light-theme .status-pill.preloading {
+    color: #dc2626;
+    border-color: rgba(220, 38, 38, 0.4);
+    box-shadow: 0 0 15px rgba(220, 38, 38, 0.1);
+}
+body.light-theme .status-pill.downloading {
+    color: #2563eb;
+    border-color: rgba(37, 99, 235, 0.5);
+    box-shadow: 0 0 15px rgba(37, 99, 235, 0.12);
+}
+body.light-theme .status-pill.downloading::before {
+    background: rgba(37, 99, 235, 0.2);
+}
+body.light-theme .status-pill.warming {
+    color: #d97706;
+    border-color: rgba(217, 119, 6, 0.4);
+    box-shadow: 0 0 12px rgba(217, 119, 6, 0.1);
+}
+body.light-theme .status-pill.warming::before {
+    background: rgba(217, 119, 6, 0.15);
+}
+body.light-theme .status-pill.loading::before,
+body.light-theme .status-pill.preloading::before {
+    background: linear-gradient(
+        90deg,
+        rgba(220, 38, 38, 0.08) 0%,
+        rgba(220, 38, 38, 0.22) 40%,
+        rgba(220, 38, 38, 0.08) 100%
+    );
+}
+body.light-theme .status-pill.ready {
+    color: #059669;
+    border-color: rgba(5, 150, 105, 0.4);
+    box-shadow: 0 0 15px rgba(5, 150, 105, 0.05);
+}
+body.light-theme .status-pill.processing {
+    color: #d97706;
+    border-color: rgba(217, 119, 6, 0.6);
+    background: rgba(217, 119, 6, 0.05);
+}
+body.light-theme .status-pill.error {
+    color: #b91c1c;
+    border-color: #b91c1c;
+    background: rgba(185, 28, 28, 0.15);
+}
 body.light-theme .guide-card { background: #f1f5f9; border-color: #e2e8f0; }
 
 /* ========================================== */

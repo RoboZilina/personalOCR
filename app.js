@@ -892,10 +892,16 @@ function checkAutoCapture() {
         let diffPixels = 0;
         for (let i = 0; i < currentData.length; i++) { if (currentData[i] !== lastScoutData[i]) diffPixels++; }
         
+        console.log('[AUTO-CAPTURE] Pixel comparison result:', {
+            diffPixels,
+            threshold: 10,
+            isProcessing: window.isProcessing,
+            engineReady: EngineManager.isReady(),
+            hasLastScoutData: !!lastScoutData
+        });
+        
         if (diffPixels > 10) {
-            if (getSetting('debug')) {
-                console.debug('[AUTO-CAPTURE] Pixel change detected:', { diffPixels, threshold: 10 });
-            }
+            console.log('[AUTO-CAPTURE] Significant change detected, starting stability timer');
             if (autoToggle.parentElement) autoToggle.parentElement.classList.add('active');
             
             stabilityTimer = setTimeout(() => {
@@ -915,11 +921,11 @@ function checkAutoCapture() {
             }, 800);
         }
     } else {
-        if (getSetting('debug')) {
-            if (window.isProcessing) console.debug('[AUTO-CAPTURE] Skipped: isProcessing=true');
-            if (!EngineManager.isReady()) console.debug('[AUTO-CAPTURE] Skipped: Engine not ready');
-            if (!lastScoutData) console.debug('[AUTO-CAPTURE] Skipped: lastScoutData is null (first run?)');
-        }
+        console.log('[AUTO-CAPTURE] Skipping pixel comparison:', {
+            isProcessing: window.isProcessing,
+            engineReady: EngineManager.isReady(),
+            hasLastScoutData: !!lastScoutData
+        });
     }
     lastScoutData = new Uint32Array(currentData);
 }

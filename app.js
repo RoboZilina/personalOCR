@@ -102,6 +102,7 @@ import { TesseractEngine } from './js/tesseract/tesseract_engine.js?v=3.8.5';
 import { PaddleOCR } from './js/paddle/paddle_engine.js?v=3.8.5';
 import { MangaOCREngine } from './js/manga/manga_engine.js?v=3.8.5';
 import { isWebGPUSupported as vnIsWebGPUSupported } from './js/onnx/onnx_support.js?v=3.8.5';
+import { applyVNValidator, cleanVNText } from './js/utils/text_validator.js?v=3.8.5';
 
 window.STATUS = STATUS;
 window.setOCRStatus = setOCRStatus;
@@ -228,7 +229,12 @@ const engines = {
         supportsModes: true,
         defaultMode: 'default_mini',
         preprocess: async (canvas, mode) => applyTesseractPreprocessing(canvas, mode),
-        postprocess: (results) => results.join(' ').trim(),
+        postprocess: (results) => {
+            if (getSetting('vnTextCleanerEnabled')) {
+                return applyVNValidator(results, ' ');
+            }
+            return results.join(' ').trim();
+        },
         handleError: (error) => { console.error(error); return "[Tesseract Error]"; },
         isMultiLine: false,
         readyStatus: 'Ready'
@@ -243,6 +249,9 @@ const engines = {
         defaultMode: null,
         preprocess: async (canvas, mode, lineCount) => applyPaddlePreprocessing(canvas, lineCount),
         postprocess: (results) => {
+            if (getSetting('vnTextCleanerEnabled')) {
+                return applyVNValidator(results, '\n');
+            }
             const cleaned = results.filter((text) => {
                 const density = scoreJapaneseDensity(text || '');
                 // Remove ONLY extreme garbage: strongly negative density
@@ -270,7 +279,12 @@ const engines = {
             cropCanvas = sharpenCanvas(cropCanvas);      // existing fixed-strength sharpening
             return [cropCanvas];
         },
-        postprocess: (results) => results.join('').trim(),
+        postprocess: (results) => {
+            if (getSetting('vnTextCleanerEnabled')) {
+                return applyVNValidator(results, '');
+            }
+            return results.join('').trim();
+        },
         handleError: (error) => { console.error(error); return "[MangaOCR Error]"; },
         isMultiLine: false,
         readyStatus: 'Ready'
@@ -1542,7 +1556,13 @@ function removeMultiPassOverlay() {
 
 function addOCRResultToUI(text, confidence = null) {
     const confStr = (confidence !== null) ? ` [${Math.round(confidence)}%]` : '';
-    const clean = text.replace(/\s+/g, '').trim(); if (!clean) return;
+    let clean;
+    if (getSetting('vnTextCleanerEnabled')) {
+        clean = cleanVNText(text);
+    } else {
+        clean = text.replace(/\s+/g, '').trim();
+    }
+    if (!clean) return;
     if (latestText) latestText.textContent = clean + confStr;
 
     const item = document.createElement('p');

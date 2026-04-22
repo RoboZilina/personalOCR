@@ -20,7 +20,8 @@ const defaultSettings = {
     textAreaSize: "standard",      // "small", "standard", "large"
     textSize: "standard",          // "small", "standard", "large"
     upscaleFactor: 2.0,
-    skipPreloading: false
+    skipPreloading: false,
+    vnTextCleanerEnabled: false
 };
 
 let currentSettings = { ...defaultSettings };

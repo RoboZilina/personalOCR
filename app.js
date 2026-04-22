@@ -231,6 +231,7 @@ const engines = {
         preprocess: async (canvas, mode) => applyTesseractPreprocessing(canvas, mode),
         postprocess: (results) => {
             if (getSetting('vnTextCleanerEnabled')) {
+                console.log('[VN Validator] Tesseract cleaning enabled', results);
                 return applyVNValidator(results, ' ');
             }
             return results.join(' ').trim();
@@ -250,6 +251,7 @@ const engines = {
         preprocess: async (canvas, mode, lineCount) => applyPaddlePreprocessing(canvas, lineCount),
         postprocess: (results) => {
             if (getSetting('vnTextCleanerEnabled')) {
+                console.log('[VN Validator] Paddle cleaning enabled', results);
                 return applyVNValidator(results, '\n');
             }
             const cleaned = results.filter((text) => {
@@ -281,6 +283,7 @@ const engines = {
         },
         postprocess: (results) => {
             if (getSetting('vnTextCleanerEnabled')) {
+                console.log('[VN Validator] Manga cleaning enabled', results);
                 return applyVNValidator(results, '');
             }
             return results.join('').trim();
@@ -1558,6 +1561,7 @@ function addOCRResultToUI(text, confidence = null) {
     const confStr = (confidence !== null) ? ` [${Math.round(confidence)}%]` : '';
     let clean;
     if (getSetting('vnTextCleanerEnabled')) {
+        console.log('[VN Validator] UI cleaning enabled', text);
         clean = cleanVNText(text);
     } else {
         clean = text.replace(/\s+/g, '').trim();

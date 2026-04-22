@@ -103,11 +103,17 @@ function removeGarbage(text) {
     uiPatterns.forEach(pattern => cleaned = cleaned.replace(pattern, ''));
     
     // Remove isolated garbage characters (when surrounded by whitespace or line boundaries)
-    // Characters: | > < * _ ~ # ^ ) ( ] [ } { % @ + = ; :
+    // Characters: | > < * _ ~ # ^ ) ( ] [ } { % @ + = ; : \
     // We'll remove them only if they are not part of a longer word.
     // Simple regex: match any of those chars preceded/followed by non‑word char or start/end.
-    cleaned = cleaned.replace(/[\|><*_~#^)(\]\[}{%@+=;:](?![A-Za-z0-9])/g, '');
-    cleaned = cleaned.replace(/(?<![A-Za-z0-9])[\|><*_~#^)(\]\[}{%@+=;:]/g, '');
+    cleaned = cleaned.replace(/[\|><*_~#^)(\]\[}{%@+=;:\\](?![A-Za-z0-9])/g, '');
+    cleaned = cleaned.replace(/(?<![A-Za-z0-9])[\|><*_~#^)(\]\[}{%@+=;:\\]/g, '');
+    
+    // Remove enclosed alphanumerics (circled digits, letters) often OCR garbage
+    cleaned = cleaned.replace(/[\u2460-\u24FF]/g, '');
+    
+    // Remove isolated ASCII letters (single letters not part of a word)
+    cleaned = cleaned.replace(/(?<![A-Za-z])[A-Za-z](?![A-Za-z])/g, '');
     
     // Remove stray ASCII after Japanese (e.g., 「ありがとう」| )
     // This is more complex; we'll handle later in VN‑specific cleanup.

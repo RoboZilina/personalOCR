@@ -589,20 +589,49 @@ if (typeof latestText !== 'undefined' && latestText) {
 async function startCapture() {
     try {
         videoStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "never" }, audio: false });
-        vnVideo.srcObject = videoStream;
-        videoStream.getVideoTracks()[0].onended = stopCapture;
-        selectWindowBtn.classList.add('stop');
-        selectWindowBtn.textContent = 'Stop Capture';
+        
+        // Defensive null checks for critical DOM elements
+        if (vnVideo) {
+            vnVideo.srcObject = videoStream;
+        } else {
+            console.warn('[CAPTURE] vnVideo element not found');
+        }
+        
+        // Safely set track ended callback
+        const videoTracks = videoStream?.getVideoTracks();
+        if (videoTracks && videoTracks.length > 0) {
+            videoTracks[0].onended = stopCapture;
+        }
+        
+        // Update UI elements with null checks
+        if (selectWindowBtn) {
+            selectWindowBtn.classList.add('stop');
+            selectWindowBtn.textContent = 'Stop Capture';
+        }
+        
         const placeholder = document.getElementById('placeholder');
         if (placeholder) placeholder.style.display = 'none';
+        
         const hint = document.getElementById('selection-hint');
         if (hint) hint.classList.add('visible');
 
         // Restore Auto-Capture Loop (Gold v3.8 Stability Pass)
         if (autoCaptureTimer) clearInterval(autoCaptureTimer);
         autoCaptureTimer = setInterval(checkAutoCapture, 500);
+        
+        // Log successful timer setup for debugging
+        console.log('[AUTO-CAPTURE] Timer started:', autoCaptureTimer ? 'YES' : 'NO');
     } catch (err) {
-        if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+        console.error('[CAPTURE] Error in startCapture:', err);
+        if (videoStream) {
+            videoStream.getTracks().forEach(t => t.stop());
+            videoStream = null;
+        }
+        // Ensure timer is cleared on error
+        if (autoCaptureTimer) {
+            clearInterval(autoCaptureTimer);
+            autoCaptureTimer = null;
+        }
     }
 }
 
@@ -796,12 +825,46 @@ function setupSelectionOverlay() {
 
 function checkAutoCapture() {
     const activeSelection = selectionRect || window.lastValidSelectionRect;
-    if (!autoToggle || !autoToggle.checked || !videoStream || !activeSelection) return;
+    
+    // Debug logging - detailed logs only in debug mode
+    if (getSetting('debug')) {
+        console.debug('[AUTO-CAPTURE] Checking:', {
+            autoToggle: !!autoToggle,
+            autoToggleChecked: autoToggle?.checked,
+            videoStream: !!videoStream,
+            activeSelection: !!activeSelection,
+            isProcessing: window.isProcessing,
+            engineReady: EngineManager.isReady(),
+            lastScoutData: !!lastScoutData,
+            vnVideoReady: vnVideo?.videoWidth > 0 && vnVideo?.videoHeight > 0
+        });
+    }
+    
+    // Critical failure checks - always log for debugging
+    if (!autoToggle || !autoToggle.checked || !videoStream || !activeSelection) {
+        // Always log critical failures (not just in debug mode)
+        if (!autoToggle) console.warn('[AUTO-CAPTURE] Failed: autoToggle element not found');
+        if (autoToggle && !autoToggle.checked) console.log('[AUTO-CAPTURE] Auto-capture disabled (checkbox unchecked)');
+        if (!videoStream) console.log('[AUTO-CAPTURE] No active video stream');
+        if (!activeSelection) console.log('[AUTO-CAPTURE] No selection rectangle defined');
+        return;
+    }
 
     // 1. Maintain scout data even during processing to prevent "stale" comparison after long loads.
     // IMPORTANT: Auto-capture must keep lastScoutData fresh even while isProcessing is true,
     // otherwise it will "wake up blind" after long operations (like PaddleOCR load)
     // and fire phantom double OCR triggers.
+    
+    // Check video dimensions before proceeding
+    if (!vnVideo || !vnVideo.videoWidth || !vnVideo.videoHeight) {
+        // Always log video readiness issues for debugging
+        console.log('[AUTO-CAPTURE] Video not ready:', {
+            width: vnVideo?.videoWidth,
+            height: vnVideo?.videoHeight
+        });
+        return;
+    }
+    
     const sel = denormalizeSelection(activeSelection, vnVideo, selectionOverlay);
     scoutCtx.drawImage(vnVideo, sel.x, sel.y, sel.w, sel.h, 0, 0, 32, 32);
     const pix = scoutCtx.getImageData(0, 0, 32, 32).data;
@@ -817,6 +880,8 @@ function checkAutoCapture() {
         let diffPixels = 0;
         for (let i = 0; i < currentData.length; i++) { if (currentData[i] !== lastScoutData[i]) diffPixels++; }
         
+        if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Comparison:', { diffPixels, threshold: 10 });
+        
         if (diffPixels > 10) {
             if (autoToggle.parentElement) autoToggle.parentElement.classList.add('active');
             
@@ -825,9 +890,18 @@ function checkAutoCapture() {
                 
                 // Re-verify conditions after 800ms delay
                 if (getSetting('autoCapture') && !window.isProcessing && EngineManager.isReady()) {
+                    if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Triggering capture');
                     captureFrame(activeSelection);
+                } else {
+                    if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Stability timer fired but conditions not met');
                 }
             }, 800);
+        }
+    } else {
+        if (getSetting('debug')) {
+            if (window.isProcessing) console.debug('[AUTO-CAPTURE] Skipped: isProcessing=true');
+            if (!EngineManager.isReady()) console.debug('[AUTO-CAPTURE] Skipped: Engine not ready');
+            if (!lastScoutData) console.debug('[AUTO-CAPTURE] Skipped: lastScoutData is null (first run?)');
         }
     }
     lastScoutData = new Uint32Array(currentData);

@@ -888,7 +888,7 @@ function checkAutoCapture() {
     if (autoToggle?.parentElement) autoToggle.parentElement.classList.remove('active');
 
     // 2. Only run comparison and stability triggers if we aren't already busy AND engine is ready
-    if (!window.isProcessing && EngineManager.isReady() && lastScoutData) {
+    if (!window.isProcessing && lastScoutData) {
         let diffPixels = 0;
         for (let i = 0; i < currentData.length; i++) { if (currentData[i] !== lastScoutData[i]) diffPixels++; }
         
@@ -896,7 +896,6 @@ function checkAutoCapture() {
             diffPixels,
             threshold: 10,
             isProcessing: window.isProcessing,
-            engineReady: EngineManager.isReady(),
             hasLastScoutData: !!lastScoutData
         });
         
@@ -923,7 +922,6 @@ function checkAutoCapture() {
     } else {
         console.log('[AUTO-CAPTURE] Skipping pixel comparison:', {
             isProcessing: window.isProcessing,
-            engineReady: EngineManager.isReady(),
             hasLastScoutData: !!lastScoutData
         });
     }

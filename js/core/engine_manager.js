@@ -560,6 +560,7 @@ const EngineManager = ((engines) => {
         getEngineMetadata: (id) => engineMetadata.get(id), // New state inspection
         getInfo: () => currentInfo || { id: null, capabilities: {} },
         getEngineInstance: () => currentEngine,
+        getCurrentEngineId: () => currentEngineId,
         getReadyStatus,
         emitError: (err) => emit('error', err),
         handleError: (err) => {

@@ -53,8 +53,17 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
     // Ignore all explicitly sourced non-active engine updates (including READY)
     // so background preload events never overwrite active-engine status.
     // Guard against uninitialized EngineManager or null getInfo() during early init.
-    const activeInfo = (typeof window.EngineManager !== 'undefined' && window.EngineManager.getInfo) ? window.EngineManager.getInfo() : {};
-    const activeId = activeInfo?.id || null;
+    const engineManager = window.EngineManager;
+    let activeId = null;
+    if (typeof engineManager !== 'undefined') {
+        if (typeof engineManager.getCurrentEngineId === 'function') {
+            activeId = engineManager.getCurrentEngineId();
+        }
+        if (!activeId && typeof engineManager.getInfo === 'function') {
+            const activeInfo = engineManager.getInfo();
+            activeId = activeInfo?.id || null;
+        }
+    }
 
     if (typeof sourceId === 'string' && activeId && sourceId !== activeId) {
         if (window.VNOCR_DEBUG || getSetting('debug')) {

@@ -826,6 +826,14 @@ function setupSelectionOverlay() {
 function checkAutoCapture() {
     const activeSelection = selectionRect || window.lastValidSelectionRect;
     
+    // Enhanced debugging - always log selection state for diagnosis
+    console.log('[AUTO-CAPTURE] Selection check:', {
+        selectionRect: selectionRect ? 'SET' : 'NULL',
+        lastValidSelectionRect: window.lastValidSelectionRect ? 'SET' : 'NULL',
+        activeSelection: activeSelection ? 'SET' : 'NULL',
+        autoToggleChecked: autoToggle?.checked ? 'ON' : 'OFF'
+    });
+    
     // Debug logging - detailed logs only in debug mode
     if (getSetting('debug')) {
         console.debug('[AUTO-CAPTURE] Checking:', {

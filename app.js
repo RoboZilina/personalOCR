@@ -873,10 +873,16 @@ function checkAutoCapture() {
         return;
     }
     
+    console.log('[AUTO-CAPTURE] Video ready, dimensions:', vnVideo.videoWidth, 'x', vnVideo.videoHeight);
+    
     const sel = denormalizeSelection(activeSelection, vnVideo, selectionOverlay);
+    console.log('[AUTO-CAPTURE] Denormalized selection:', sel);
+    
     scoutCtx.drawImage(vnVideo, sel.x, sel.y, sel.w, sel.h, 0, 0, 32, 32);
     const pix = scoutCtx.getImageData(0, 0, 32, 32).data;
     const currentData = new Uint32Array(pix.buffer);
+    
+    console.log('[AUTO-CAPTURE] Pixel data captured, lastScoutData:', lastScoutData ? 'EXISTS' : 'NULL');
 
     // Clear any pending stability timer before making new decisions
     clearTimeout(stabilityTimer);
@@ -884,13 +890,20 @@ function checkAutoCapture() {
 
     // 2. Only run comparison and stability triggers if we aren't already busy AND engine is ready
     // Hardening v3.8: Added EngineManager.isReady() guard to prevent captures during switching/loading.
+    console.log('[AUTO-CAPTURE] Pre-comparison check:', {
+        isProcessing: window.isProcessing,
+        engineReady: EngineManager.isReady(),
+        lastScoutData: !!lastScoutData
+    });
+    
     if (!window.isProcessing && EngineManager.isReady() && lastScoutData) {
         let diffPixels = 0;
         for (let i = 0; i < currentData.length; i++) { if (currentData[i] !== lastScoutData[i]) diffPixels++; }
         
-        if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Comparison:', { diffPixels, threshold: 10 });
+        console.log('[AUTO-CAPTURE] Pixel comparison:', { diffPixels, threshold: 10 });
         
         if (diffPixels > 10) {
+            console.log('[AUTO-CAPTURE] Significant change detected, starting stability timer');
             if (autoToggle.parentElement) autoToggle.parentElement.classList.add('active');
             
             stabilityTimer = setTimeout(() => {

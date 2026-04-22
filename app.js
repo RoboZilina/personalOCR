@@ -883,10 +883,6 @@ function checkAutoCapture() {
     const pix = scoutCtx.getImageData(0, 0, 32, 32).data;
     const currentData = new Uint32Array(pix.buffer);
 
-    // Clear any pending stability timer before making new decisions
-    clearTimeout(stabilityTimer);
-    if (autoToggle?.parentElement) autoToggle.parentElement.classList.remove('active');
-
     // 2. Only run comparison and stability triggers if we aren't already busy AND engine is ready
     if (!window.isProcessing && lastScoutData) {
         let diffPixels = 0;
@@ -900,6 +896,10 @@ function checkAutoCapture() {
         });
         
         if (diffPixels > 10) {
+            // Clear any pending stability timer before making new decisions
+            clearTimeout(stabilityTimer);
+            if (autoToggle?.parentElement) autoToggle.parentElement.classList.remove('active');
+            
             console.log('[AUTO-CAPTURE] Significant change detected, starting stability timer');
             if (autoToggle.parentElement) autoToggle.parentElement.classList.add('active');
             

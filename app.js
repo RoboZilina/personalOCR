@@ -826,13 +826,15 @@ function setupSelectionOverlay() {
 function checkAutoCapture() {
     const activeSelection = selectionRect || window.lastValidSelectionRect;
     
-    // Enhanced debugging - always log selection state for diagnosis
-    console.log('[AUTO-CAPTURE] Selection check:', {
-        selectionRect: selectionRect ? 'SET' : 'NULL',
-        lastValidSelectionRect: window.lastValidSelectionRect ? 'SET' : 'NULL',
-        activeSelection: activeSelection ? 'SET' : 'NULL',
-        autoToggleChecked: autoToggle?.checked ? 'ON' : 'OFF'
-    });
+    // Minimal debugging - log only in debug mode
+    if (getSetting('debug')) {
+        console.debug('[AUTO-CAPTURE] Selection check:', {
+            selectionRect: selectionRect ? 'SET' : 'NULL',
+            lastValidSelectionRect: window.lastValidSelectionRect ? 'SET' : 'NULL',
+            activeSelection: activeSelection ? 'SET' : 'NULL',
+            autoToggleChecked: autoToggle?.checked ? 'ON' : 'OFF'
+        });
+    }
     
     // Debug logging - detailed logs only in debug mode
     if (getSetting('debug')) {
@@ -873,37 +875,26 @@ function checkAutoCapture() {
         return;
     }
     
-    console.log('[AUTO-CAPTURE] Video ready, dimensions:', vnVideo.videoWidth, 'x', vnVideo.videoHeight);
-    
+    // Video is ready, proceed with capture
     const sel = denormalizeSelection(activeSelection, vnVideo, selectionOverlay);
-    console.log('[AUTO-CAPTURE] Denormalized selection:', sel);
     
     scoutCtx.drawImage(vnVideo, sel.x, sel.y, sel.w, sel.h, 0, 0, 32, 32);
     const pix = scoutCtx.getImageData(0, 0, 32, 32).data;
     const currentData = new Uint32Array(pix.buffer);
-    
-    console.log('[AUTO-CAPTURE] Pixel data captured, lastScoutData:', lastScoutData ? 'EXISTS' : 'NULL');
 
     // Clear any pending stability timer before making new decisions
     clearTimeout(stabilityTimer);
     if (autoToggle?.parentElement) autoToggle.parentElement.classList.remove('active');
 
     // 2. Only run comparison and stability triggers if we aren't already busy AND engine is ready
-    // Hardening v3.8: Added EngineManager.isReady() guard to prevent captures during switching/loading.
-    console.log('[AUTO-CAPTURE] Pre-comparison check:', {
-        isProcessing: window.isProcessing,
-        engineReady: EngineManager.isReady(),
-        lastScoutData: !!lastScoutData
-    });
-    
     if (!window.isProcessing && EngineManager.isReady() && lastScoutData) {
         let diffPixels = 0;
         for (let i = 0; i < currentData.length; i++) { if (currentData[i] !== lastScoutData[i]) diffPixels++; }
         
-        console.log('[AUTO-CAPTURE] Pixel comparison:', { diffPixels, threshold: 10 });
-        
         if (diffPixels > 10) {
-            console.log('[AUTO-CAPTURE] Significant change detected, starting stability timer');
+            if (getSetting('debug')) {
+                console.debug('[AUTO-CAPTURE] Pixel change detected:', { diffPixels, threshold: 10 });
+            }
             if (autoToggle.parentElement) autoToggle.parentElement.classList.add('active');
             
             stabilityTimer = setTimeout(() => {
@@ -911,10 +902,14 @@ function checkAutoCapture() {
                 
                 // Re-verify conditions after 800ms delay
                 if (getSetting('autoCapture') && !window.isProcessing && EngineManager.isReady()) {
-                    if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Triggering capture');
+                    console.log('[AUTO-CAPTURE] Stability timer fired - Triggering capture');
                     captureFrame(activeSelection);
                 } else {
-                    if (getSetting('debug')) console.debug('[AUTO-CAPTURE] Stability timer fired but conditions not met');
+                    console.log('[AUTO-CAPTURE] Stability timer fired but conditions not met:', {
+                        autoCapture: getSetting('autoCapture'),
+                        isProcessing: window.isProcessing,
+                        engineReady: EngineManager.isReady()
+                    });
                 }
             }, 800);
         }

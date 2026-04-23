@@ -47,7 +47,9 @@ export class TesseractEngine {
     async load() {
         if (this.isLoaded && this.worker) return;
 
-        this.checkAssets();
+        this.checkAssets().then(ok => {
+            if (!ok) console.warn('Tesseract: Some assets may be missing; proceeding anyway.');
+        }).catch(() => {});
 
         try {
             // Hybrid Paths: High-res GitHub data + Stable UNPKG logic

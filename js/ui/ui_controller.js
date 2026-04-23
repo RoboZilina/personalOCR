@@ -107,11 +107,16 @@ function setOCRStatus(state, text, progress = null, sourceId = null) {
 
         // Text Transition (Fading)
         if (statusLabel.textContent !== t) {
-            statusLabel.classList.add('fading');
-            setTimeout(() => {
+            if (s === STATUS.PROCESSING) {
+                // Immediate update for processing status to ensure visibility
                 statusLabel.textContent = t;
-                statusLabel.classList.remove('fading');
-            }, 100); // Wait for fade-out, update, then fade-in via CSS
+            } else {
+                statusLabel.classList.add('fading');
+                setTimeout(() => {
+                    statusLabel.textContent = t;
+                    statusLabel.classList.remove('fading');
+                }, 100); // Wait for fade-out, update, then fade-in via CSS
+            }
         }
     }
 }

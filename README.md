@@ -12,6 +12,7 @@ This version represents the final production-hardened standard. It incorporates 
 - **High-Speed Clipping (Auto-Copy)** — A premium extraction utility that automatically copies manually selected text from transcription fields to the clipboard with visual feedback.
 - **Reality-Sync Recovery** — Advanced DOM hydration logic that eliminates "temporal vacuum" race conditions during initial page load.
 - **Zero-Allocation Memory Architecture** — Every inference loop uses pre-allocated, hardware-aligned memory pools, preventing Garbage Collection spikes.
+- **VN‑Optimized Text Validator** — Eight‑layer deterministic cleaning pipeline that removes UI artifacts, normalizes punctuation, and applies visual‑novel‑specific spacing rules, with a toggle in the side menu.
 - **Service Worker Efficiency** — Optimized caching strategy specifically designed for Cloudflare, excluding massive binary models to prevent storage bloat.
 
 ## Hosting & Deployment Hardening

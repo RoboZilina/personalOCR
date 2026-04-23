@@ -39,7 +39,7 @@
                 <div class="brand">Personal OCR</div>
                 <div class="divider"></div>
                 <div class="controls-group">
-                    <select id="mode-selector" class="ui-select">
+                    <select id="mode-selector" class="ui-select" aria-label="OCR processing mode">
                         <option value="default_mini" selected>Default Mini</option>
                         <option value="default_full">Default Full</option>
                         <option value="adaptive">Adaptive</option>
@@ -49,7 +49,7 @@
                         <option value="grayscale">Grayscale</option>
                         <option value="raw">Raw</option>
                     </select>
-                    <select id="model-selector" class="ui-select">
+                    <select id="model-selector" class="ui-select" aria-label="OCR engine model">
                         <option value="tesseract">Tesseract (Lightweight)</option>
                         <optgroup label="PaddleOCR (Multi-Line)">
                             <option value="paddle_1">PaddleOCR – 1 line</option>
@@ -136,8 +136,8 @@
                 <div class="transcription-tray">
                     <div class="tray-actions">
                         <div class="tray-buttons-row">
-                            <button id="refresh-ocr-btn" class="btn action-btn" disabled>🔄 RE-CAPTURE</button>
-                            <button id="auto-capture-btn" class="btn auto-btn">
+                            <button id="refresh-ocr-btn" class="btn action-btn" disabled aria-label="Re-capture OCR">🔄 RE-CAPTURE</button>
+                            <button id="auto-capture-btn" class="btn auto-btn" aria-label="Toggle auto-capture">
                                 <span class="auto-btn-text"></span>
                             </button>
                         </div>
@@ -242,6 +242,13 @@
                         <li><strong>Grayscale:</strong> Preserved tonal detail. Good for colorful or gradient backgrounds.</li>
                         <li><strong>Raw:</strong> No digital preprocessing. Direct capture.</li>
                     </ul>
+                </div>
+                <div class="guide-card">
+                    <h3>🧹 VN‑Optimized Text Validator</h3>
+                    <p>Toggle the <strong>VN Text Cleaner</strong> in the Side Menu (≡) to enable an eight‑layer deterministic cleaning pipeline that removes UI artifacts, normalizes punctuation, and applies visual‑novel‑specific spacing rules. This post‑processing step runs after OCR and significantly improves readability for Japanese visual‑novel text.</p>
+                    <p style="font-size: 12px; opacity: 0.8; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 10px;">
+                        <em>Off by default; toggle On for cleaner output.</em>
+                    </p>
                 </div>
                 <div class="guide-card">
                     <h3>🔍 Scaling &amp; OCR Engine</h3>

@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     --font-ui:
         Inter,
         -apple-system,
@@ -348,7 +348,7 @@ body.text-area-large .app-main.manga-layout .transcription-tray { width: 650px; 
 }
 .status-pill.downloading::before {
     background: rgba(96, 165, 250, 0.2);
-    /* No animation — width is driven by --progress for a deterministic fill bar */
+    /* No animation 窶・width is driven by --progress for a deterministic fill bar */
 }
 
 /* Warming-up: amber, shows --progress fill */
